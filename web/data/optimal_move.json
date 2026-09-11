@@ -1,0 +1,11 @@
+{
+  "format": "optimal_move_3bit_v1",
+  "state_count": 88179840,
+  "move_count": 6,
+  "moves": ["R", "R'", "U", "U'", "F", "F'"],
+  "solved_value": 6,
+  "unused_value": 7,
+  "visited_states": 88179840,
+  "max_distance": 14,
+  "packing": "3 bits per state, little-endian bit order"
+}

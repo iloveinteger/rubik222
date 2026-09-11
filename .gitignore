@@ -1,0 +1,19 @@
+# CMake
+precompute/build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Generated solver data kept only in precompute/output
+precompute/output/*.bin
+precompute/output/*.json
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
