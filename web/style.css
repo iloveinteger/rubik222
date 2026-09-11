@@ -77,7 +77,6 @@ body {
     margin: 0;
     padding: 0;
 
-    /* Pure white */
     color: #ffffff;
     opacity: 1;
 
@@ -97,15 +96,24 @@ body {
     text-align: center;
     white-space: nowrap;
 
-    /* No background */
     background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
 
-    /* Very subtle readability enhancement */
     text-shadow:
         0 1px 8px rgba(0, 0, 0, 0.55);
 
     pointer-events: none;
     user-select: none;
+}
+
+@media (max-width: 600px) {
+    #status {
+        bottom: 22px;
+        font-size: 14px;
+    }
 }
 
 @media (max-width: 600px) {
