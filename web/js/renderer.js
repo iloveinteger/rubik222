@@ -1,4 +1,3 @@
-
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js";
 import { affectedPositions } from "./cube.js";
 
@@ -14,27 +13,16 @@ const CORNERS = [
 ];
 
 /*
- * IMPORTANT:
+ * Kociemba corner face order.
  *
- * The order of the three directions is not simply
- *
- *     [U/D, R/L, F/B]
- *
- * for every corner.
- *
- * It must follow the Kociemba corner order:
- *
- *     URF = U R F
- *     UFL = U F L
- *     ULB = U L B
- *     UBR = U B R
- *     DFR = D F R
- *     DLF = D L F
- *     DBL = D B L
- *     DRB = D R B
- *
- * With this ordering, Kociemba co=1/co=2 corresponds
- * exactly to cyclically shifting these three directions.
+ * URF = U R F
+ * UFL = U F L
+ * ULB = U L B
+ * UBR = U B R
+ * DFR = D F R
+ * DLF = D L F
+ * DBL = D B L
+ * DRB = D R B
  */
 const FACE_DIRS = [
     // URF
@@ -95,10 +83,10 @@ const FACE_DIRS = [
 ];
 
 const FACE_COLOR = {
-    U: 0xf4f4f4,
+    U: 0xf7f7f7,
     D: 0xf2cf35,
-    R: 0xd93b32,
-    L: 0xf08a35,
+    R: 0xd83b32,
+    L: 0xef8734,
     F: 0x35a853,
     B: 0x3c6dcc,
 };
@@ -111,9 +99,14 @@ function faceName(normal) {
     if (x > 0) return "R";
     if (x < 0) return "L";
     if (z > 0) return "F";
+
     return "B";
 }
 
+/*
+ * PlaneGeometry faces the +Z direction by default.
+ * Rotate it so the sticker lies flush with the corresponding cube face.
+ */
 function stickerRotation(normal) {
     const [x, y, z] = normal;
 
@@ -129,19 +122,14 @@ function stickerRotation(normal) {
 }
 
 function stickerMaterial(face) {
-    return new THREE.MeshBasicMaterial({
+    return new THREE.MeshStandardMaterial({
         color: FACE_COLOR[face],
+        roughness: 0.48,
+        metalness: 0.0,
         side: THREE.DoubleSide,
     });
 }
 
-/*
- * Return the three original sticker colors of a cubie.
- *
- * identity 0 = URF -> [U, R, F]
- * identity 1 = UFL -> [U, F, L]
- * ...
- */
 function identityColors(identity) {
     return FACE_DIRS[identity].map(faceName);
 }
@@ -151,13 +139,26 @@ function makeCubie(identity) {
 
     group.userData.identity = identity;
 
-    const body = new THREE.Mesh(
-        new THREE.BoxGeometry(0.96, 0.96, 0.96),
+    /*
+     * Slightly smaller than the spacing between cubies.
+     * This produces clean black seams without excessive gaps.
+     */
+    const bodyGeometry = new THREE.BoxGeometry(
+        0.96,
+        0.96,
+        0.96
+    );
+
+    const bodyMaterial =
         new THREE.MeshStandardMaterial({
-            color: 0x111111,
-            roughness: 0.72,
-            metalness: 0.04,
-        })
+            color: 0x101010,
+            roughness: 0.68,
+            metalness: 0.02,
+        });
+
+    const body = new THREE.Mesh(
+        bodyGeometry,
+        bodyMaterial
     );
 
     group.add(body);
@@ -169,87 +170,205 @@ export class CubeRenderer {
     constructor(container) {
         this.container = container;
 
-        this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x111111);
+        /* ---------------------------------------------------------
+         * Scene
+         * --------------------------------------------------------- */
 
-        this.camera = new THREE.OrthographicCamera(
-            -4,
-            4,
-            4,
-            -4,
-            0.1,
-            100
+        this.scene = new THREE.Scene();
+
+        this.scene.background =
+            new THREE.Color(0x0b0b0b);
+
+        /* ---------------------------------------------------------
+         * Camera
+         * --------------------------------------------------------- */
+
+        this.camera =
+            new THREE.OrthographicCamera(
+                -4,
+                4,
+                4,
+                -4,
+                0.1,
+                100
+            );
+
+        this.camera.position.set(
+            6,
+            6,
+            6
         );
 
-        this.camera.position.set(6, 6, 6);
-        this.camera.lookAt(0, 0, 0);
+        this.camera.lookAt(
+            0,
+            0,
+            0
+        );
 
-        this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
-            alpha: false,
-        });
+        /* ---------------------------------------------------------
+         * Renderer
+         * --------------------------------------------------------- */
 
+        this.renderer =
+            new THREE.WebGLRenderer({
+                antialias: true,
+                alpha: false,
+                powerPreference: "high-performance",
+            });
+
+        /*
+         * 2x is a good quality/performance ceiling for this scene.
+         * Higher values are usually unnecessary and expensive on mobile.
+         */
         this.renderer.setPixelRatio(
-            Math.min(window.devicePixelRatio, 2)
+            Math.min(
+                window.devicePixelRatio || 1,
+                2
+            )
         );
 
         this.renderer.setSize(
-            container.clientWidth,
-            container.clientHeight
+            Math.max(1, container.clientWidth),
+            Math.max(1, container.clientHeight),
+            false
         );
 
+        /*
+         * Modern color pipeline.
+         */
         this.renderer.outputColorSpace =
             THREE.SRGBColorSpace;
+
+        /*
+         * Filmic tone mapping makes the StandardMaterial lighting
+         * look less harsh and more photographic.
+         */
+        this.renderer.toneMapping =
+            THREE.ACESFilmicToneMapping;
+
+        this.renderer.toneMappingExposure = 1.0;
 
         container.appendChild(
             this.renderer.domElement
         );
 
-        this.cubeRoot = new THREE.Group();
-        this.scene.add(this.cubeRoot);
+        /* ---------------------------------------------------------
+         * Cube root
+         * --------------------------------------------------------- */
 
-        /*
-         * One persistent Three.js object for each physical
-         * corner identity.
-         */
+        this.cubeRoot =
+            new THREE.Group();
+
+        this.scene.add(
+            this.cubeRoot
+        );
+
+        /* ---------------------------------------------------------
+         * Persistent cubies
+         * --------------------------------------------------------- */
+
         this.cubies = Array.from(
             { length: 8 },
             (_, identity) => {
-                const cubie = makeCubie(identity);
-                this.cubeRoot.add(cubie);
+                const cubie =
+                    makeCubie(identity);
+
+                this.cubeRoot.add(
+                    cubie
+                );
+
                 return cubie;
             }
         );
 
-        this.light = new THREE.HemisphereLight(
-            0xffffff,
-            0x555555,
-            2.1
+        /* ---------------------------------------------------------
+         * Lighting
+         * --------------------------------------------------------- */
+
+        /*
+         * Soft global fill.
+         */
+        this.ambientLight =
+            new THREE.HemisphereLight(
+                0xffffff,
+                0x181818,
+                1.65
+            );
+
+        this.scene.add(
+            this.ambientLight
         );
 
-        this.scene.add(this.light);
+        /*
+         * Main soft-looking directional light.
+         */
+        this.keyLight =
+            new THREE.DirectionalLight(
+                0xffffff,
+                2.25
+            );
 
-        this.keyLight = new THREE.DirectionalLight(
-            0xffffff,
-            2.2
+        this.keyLight.position.set(
+            5,
+            8,
+            7
         );
 
-        this.keyLight.position.set(5, 8, 6);
-        this.scene.add(this.keyLight);
+        this.scene.add(
+            this.keyLight
+        );
+
+        /*
+         * Gentle secondary fill from the opposite side.
+         * This prevents the back/right faces from becoming completely flat.
+         */
+        this.fillLight =
+            new THREE.DirectionalLight(
+                0xb8c8ff,
+                0.55
+            );
+
+        this.fillLight.position.set(
+                -5,
+                2,
+                -4
+        );
+
+        this.scene.add(
+            this.fillLight
+        );
+
+        /* ---------------------------------------------------------
+         * Animation state
+         * --------------------------------------------------------- */
 
         this.pivot = null;
         this.moving = null;
+
+        /* ---------------------------------------------------------
+         * Resize
+         * --------------------------------------------------------- */
 
         this.resizeObserver =
             new ResizeObserver(() => {
                 this.resize();
             });
 
-        this.resizeObserver.observe(container);
+        this.resizeObserver.observe(
+            container
+        );
 
         this.resize();
 
+        /* ---------------------------------------------------------
+         * State
+         * --------------------------------------------------------- */
+
         this.state = null;
+
+        /* ---------------------------------------------------------
+         * Render loop
+         * --------------------------------------------------------- */
 
         this.renderLoop =
             this.renderLoop.bind(this);
@@ -260,17 +379,25 @@ export class CubeRenderer {
     }
 
     resize() {
-        const width = Math.max(
-            1,
-            this.container.clientWidth
-        );
+        const width =
+            Math.max(
+                1,
+                this.container.clientWidth
+            );
 
-        const height = Math.max(
-            1,
-            this.container.clientHeight
-        );
+        const height =
+            Math.max(
+                1,
+                this.container.clientHeight
+            );
 
-        const aspect = width / height;
+        const aspect =
+            width / height;
+
+        /*
+         * Keep the cube approximately the same visual size
+         * regardless of screen aspect ratio.
+         */
         const size = 4.5;
 
         this.camera.left =
@@ -279,8 +406,11 @@ export class CubeRenderer {
         this.camera.right =
             size * aspect;
 
-        this.camera.top = size;
-        this.camera.bottom = -size;
+        this.camera.top =
+            size;
+
+        this.camera.bottom =
+            -size;
 
         this.camera.updateProjectionMatrix();
 
@@ -302,14 +432,31 @@ export class CubeRenderer {
         );
     }
 
-    setWholeCubeTransform(position, quaternion) {
-        this.cubeRoot.position.copy(position);
-        this.cubeRoot.quaternion.copy(quaternion);
+    setWholeCubeTransform(
+        position,
+        quaternion
+    ) {
+        this.cubeRoot.position.copy(
+            position
+        );
+
+        this.cubeRoot.quaternion.copy(
+            quaternion
+        );
     }
 
     resetWholeCubeTransform() {
-        this.cubeRoot.position.set(0, 0, 0);
-        this.cubeRoot.rotation.set(0, 0, 0);
+        this.cubeRoot.position.set(
+            0,
+            0,
+            0
+        );
+
+        this.cubeRoot.rotation.set(
+            0,
+            0,
+            0
+        );
     }
 
     rebuild(state) {
@@ -317,19 +464,25 @@ export class CubeRenderer {
 
         this.resetWholeCubeTransform();
 
-        for (let slot = 0; slot < 8; ++slot) {
+        for (
+            let slot = 0;
+            slot < 8;
+            ++slot
+        ) {
             /*
-             * cp[slot] tells us which physical cubie is
-             * currently occupying this position.
+             * cp[slot] = physical cubie occupying this slot.
              */
-            const identity = state.cp[slot];
-            const co = state.co[slot];
+            const identity =
+                state.cp[slot];
+
+            const co =
+                state.co[slot];
 
             const cubie =
                 this.cubies[identity];
 
             /*
-             * Position comes from CURRENT SLOT.
+             * Position is determined by the current slot.
              */
             cubie.position.set(
                 CORNERS[slot][0] * 0.51,
@@ -338,34 +491,40 @@ export class CubeRenderer {
             );
 
             /*
-             * We don't rotate the cubie object itself.
-             * Sticker positions represent its orientation.
+             * Orientation is represented by sticker placement,
+             * not by rotating the cubie itself.
              */
-            cubie.rotation.set(0, 0, 0);
+            cubie.rotation.set(
+                0,
+                0,
+                0
+            );
 
-            cubie.userData.slot = slot;
-            cubie.userData.orientation = co;
+            cubie.userData.slot =
+                slot;
+
+            cubie.userData.orientation =
+                co;
 
             /*
-             * Remove old stickers.
-             * Child 0 is the black body.
+             * Child 0 = black cubie body.
+             * Remove all previous stickers.
              */
-            while (cubie.children.length > 1) {
+            while (
+                cubie.children.length > 1
+            ) {
                 cubie.remove(
                     cubie.children[1]
                 );
             }
 
-            /*
-             * Original sticker colors belong to
-             * the cubie's identity.
-             */
             const colors =
-                identityColors(identity);
+                identityColors(
+                    identity
+                );
 
             /*
-             * Target directions belong to
-             * the current slot.
+             * Target face order is determined by the current slot.
              */
             const dirs =
                 FACE_DIRS[slot];
@@ -373,25 +532,13 @@ export class CubeRenderer {
             /*
              * Kociemba corner orientation:
              *
-             * co = 0:
-             *     original 0 -> target 0
-             *     original 1 -> target 1
-             *     original 2 -> target 2
-             *
-             * co = 1:
-             *     original 0 -> target 1
-             *     original 1 -> target 2
-             *     original 2 -> target 0
-             *
-             * co = 2:
-             *     original 0 -> target 2
-             *     original 1 -> target 0
-             *     original 2 -> target 1
+             * target = (original + co) mod 3
              */
-            for (let original = 0;
-                 original < 3;
-                 ++original) {
-
+            for (
+                let original = 0;
+                original < 3;
+                ++original
+            ) {
                 const target =
                     (original + co) % 3;
 
@@ -420,7 +567,9 @@ export class CubeRenderer {
                     rx,
                     ry,
                     rz
-                ] = stickerRotation(normal);
+                ] = stickerRotation(
+                    normal
+                );
 
                 sticker.rotation.set(
                     rx,
@@ -428,7 +577,9 @@ export class CubeRenderer {
                     rz
                 );
 
-                cubie.add(sticker);
+                cubie.add(
+                    sticker
+                );
             }
         }
     }
@@ -443,48 +594,47 @@ export class CubeRenderer {
         const pivot =
             new THREE.Group();
 
-        this.cubeRoot.add(pivot);
+        this.cubeRoot.add(
+            pivot
+        );
 
-        this.pivot = pivot;
+        this.pivot =
+            pivot;
 
         const affected =
-            affectedPositions(move);
+            affectedPositions(
+                move
+            );
 
-        /*
-         * Select cubies using the CURRENT logical
-         * positions before the physical animation.
-         */
-        this.moving = affected.map(slot => {
-            const identity =
-                this.state.cp[slot];
+        this.moving =
+            affected.map(slot => {
+                const identity =
+                    this.state.cp[slot];
 
-            const cubie =
-                this.cubies[identity];
+                const cubie =
+                    this.cubies[identity];
 
-            pivot.attach(cubie);
+                pivot.attach(
+                    cubie
+                );
 
-            return cubie;
-        });
+                return cubie;
+            });
     }
 
-    animateMove(move, duration = 360) {
+    animateMove(
+        move,
+        duration = 360
+    ) {
         this.beginMove(move);
 
         /*
-         * These signs are matched directly against
-         * MOVE_CP in cube.js.
+         * Physical rotation signs matched to cube.js.
          *
-         * R:
-         *     URF -> UBR
-         *     UBR -> DRB
-         *     ...
-         *
-         * U:
-         *     URF -> UFL
-         *     ...
-         *
-         * F:
-         *     URF -> DFR
+         * Coordinate system:
+         *   +X = R
+         *   +Y = U
+         *   +Z = F
          */
         let angle;
 
@@ -557,7 +707,7 @@ export class CubeRenderer {
                     );
 
                 /*
-                 * Smoothstep easing.
+                 * Smoothstep gives a soft acceleration and deceleration.
                  */
                 const eased =
                     t * t * (3 - 2 * t);
@@ -577,8 +727,7 @@ export class CubeRenderer {
                 }
 
                 /*
-                 * Finish exactly at the
-                 * target angle.
+                 * Exact final angle.
                  */
                 this.pivot
                     .setRotationFromAxisAngle(
@@ -591,11 +740,13 @@ export class CubeRenderer {
                 );
 
                 /*
-                 * Return cubies to cubeRoot.
-                 * main.js immediately calls rebuild()
-                 * with the new logical state.
+                 * Attach moving cubies back to cubeRoot
+                 * while preserving their world transform.
                  */
-                for (const cubie of this.moving) {
+                for (
+                    const cubie
+                    of this.moving
+                ) {
                     this.cubeRoot.attach(
                         cubie
                     );
@@ -611,7 +762,9 @@ export class CubeRenderer {
                 resolve();
             };
 
-            requestAnimationFrame(frame);
+            requestAnimationFrame(
+                frame
+            );
         });
     }
 }
