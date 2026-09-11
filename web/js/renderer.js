@@ -61,21 +61,46 @@ function identityColors(identity) {
 }
 
 function createStickerGeometry() {
-    return new THREE.PlaneGeometry(0.78, 0.78);
+    return new THREE.PlaneGeometry(
+        0.78,
+        0.78
+    );
 }
 
 function createCubieGeometry() {
-    return new THREE.BoxGeometry(0.96, 0.96, 0.96);
+    return new THREE.BoxGeometry(
+        0.96,
+        0.96,
+        0.96
+    );
+}
+
+/*
+ * Black core behind the cubies.
+ *
+ * Cubie centers are at ±0.51 and cubie size is 0.96,
+ * so the outer cubie surface reaches ±0.99.
+ *
+ * The core reaches ±1.00, leaving it just behind the
+ * cubie surfaces while filling the gaps between cubies.
+ */
+function createCoreGeometry() {
+    return new THREE.BoxGeometry(
+        2.0,
+        2.0,
+        2.0
+    );
 }
 
 function createStickerMaterials() {
     const materials = {};
 
     for (const [face, color] of Object.entries(FACE_COLOR)) {
-        materials[face] = new THREE.MeshBasicMaterial({
-            color,
-            side: THREE.FrontSide,
-        });
+        materials[face] =
+            new THREE.MeshBasicMaterial({
+                color,
+                side: THREE.FrontSide,
+            });
     }
 
     return materials;
@@ -87,15 +112,20 @@ function createBodyMaterial() {
     });
 }
 
-function makeCubie(identity, bodyGeometry, bodyMaterial) {
+function makeCubie(
+    identity,
+    bodyGeometry,
+    bodyMaterial
+) {
     const group = new THREE.Group();
 
     group.userData.identity = identity;
 
-    const body = new THREE.Mesh(
-        bodyGeometry,
-        bodyMaterial
-    );
+    const body =
+        new THREE.Mesh(
+            bodyGeometry,
+            bodyMaterial
+        );
 
     group.add(body);
 
@@ -107,6 +137,7 @@ export class CubeRenderer {
         this.container = container;
 
         this.scene = new THREE.Scene();
+
         this.scene.background =
             new THREE.Color(0x0b0b0b);
 
@@ -120,8 +151,17 @@ export class CubeRenderer {
                 100
             );
 
-        this.camera.position.set(6, 6, 6);
-        this.camera.lookAt(0, 0, 0);
+        this.camera.position.set(
+            6,
+            6,
+            6
+        );
+
+        this.camera.lookAt(
+            0,
+            0,
+            0
+        );
 
         this.renderer =
             new THREE.WebGLRenderer({
@@ -134,7 +174,8 @@ export class CubeRenderer {
         this.renderer.outputColorSpace =
             THREE.SRGBColorSpace;
 
-        this.renderer.shadowMap.enabled = false;
+        this.renderer.shadowMap.enabled =
+            false;
 
         this.renderer.setPixelRatio(
             Math.min(
@@ -144,8 +185,14 @@ export class CubeRenderer {
         );
 
         this.renderer.setSize(
-            Math.max(1, container.clientWidth),
-            Math.max(1, container.clientHeight),
+            Math.max(
+                1,
+                container.clientWidth
+            ),
+            Math.max(
+                1,
+                container.clientHeight
+            ),
             false
         );
 
@@ -153,8 +200,35 @@ export class CubeRenderer {
             this.renderer.domElement
         );
 
-        this.cubeRoot = new THREE.Group();
-        this.scene.add(this.cubeRoot);
+        this.cubeRoot =
+            new THREE.Group();
+
+        this.scene.add(
+            this.cubeRoot
+        );
+
+        /*
+         * Black core.
+         *
+         * This is a real 3D object, not empty space.
+         * Therefore the black gap remains visible even
+         * when another cubie's sticker rotates over it.
+         */
+        this.coreGeometry =
+            createCoreGeometry();
+
+        this.coreMaterial =
+            createBodyMaterial();
+
+        this.core =
+            new THREE.Mesh(
+                this.coreGeometry,
+                this.coreMaterial
+            );
+
+        this.cubeRoot.add(
+            this.core
+        );
 
         this.stickerGeometry =
             createStickerGeometry();
@@ -179,7 +253,9 @@ export class CubeRenderer {
                             this.bodyMaterial
                         );
 
-                    this.cubeRoot.add(cubie);
+                    this.cubeRoot.add(
+                        cubie
+                    );
 
                     return cubie;
                 }
@@ -188,9 +264,11 @@ export class CubeRenderer {
         /*
          * Animation state.
          *
-         * animateMove() no longer owns a separate RAF.
-         * The main render loop updates animation first,
-         * then renders the scene.
+         * animateMove() does not create its own
+         * requestAnimationFrame loop.
+         *
+         * The single render loop updates animation
+         * and then renders the scene.
          */
         this.animation = null;
 
@@ -199,7 +277,9 @@ export class CubeRenderer {
                 this.resize();
             });
 
-        this.resizeObserver.observe(container);
+        this.resizeObserver.observe(
+            container
+        );
 
         this.resize();
 
@@ -226,7 +306,9 @@ export class CubeRenderer {
                 this.container.clientHeight
             );
 
-        const aspect = width / height;
+        const aspect =
+            width / height;
+
         const size = 4.5;
 
         this.camera.left =
@@ -235,8 +317,11 @@ export class CubeRenderer {
         this.camera.right =
             size * aspect;
 
-        this.camera.top = size;
-        this.camera.bottom = -size;
+        this.camera.top =
+            size;
+
+        this.camera.bottom =
+            -size;
 
         this.camera.updateProjectionMatrix();
 
@@ -268,7 +353,8 @@ export class CubeRenderer {
     }
 
     updateAnimation(now) {
-        const animation = this.animation;
+        const animation =
+            this.animation;
 
         if (!animation) {
             return;
@@ -285,67 +371,84 @@ export class CubeRenderer {
 
         /*
          * Quintic smootherstep.
-         *
-         * Compared with the previous smoothstep,
-         * both velocity and acceleration approach zero
-         * smoothly at the beginning and end.
          */
         const eased =
             6 * t ** 5 -
             15 * t ** 4 +
             10 * t ** 3;
 
-        animation.pivot.setRotationFromAxisAngle(
-            animation.axis,
-            animation.angle * eased
-        );
+        animation.pivot
+            .setRotationFromAxisAngle(
+                animation.axis,
+                animation.angle * eased
+            );
 
         if (t < 1) {
             return;
         }
 
         /*
-         * Force the exact final angle.
-         * No visual snap should occur because the previous
-         * frame is already arbitrarily close to the target.
+         * Exact final rotation.
          */
-        animation.pivot.setRotationFromAxisAngle(
-            animation.axis,
-            animation.angle
-        );
+        animation.pivot
+            .setRotationFromAxisAngle(
+                animation.axis,
+                animation.angle
+            );
 
         /*
-         * Make sure the pivot's final world matrix is current
-         * before detaching the cubies.
+         * Update matrices before transferring
+         * the cubies back to cubeRoot.
          */
-        this.cubeRoot.updateMatrixWorld(true);
-        animation.pivot.updateMatrixWorld(true);
+        this.cubeRoot
+            .updateMatrixWorld(true);
+
+        animation.pivot
+            .updateMatrixWorld(true);
 
         for (const cubie of animation.moving) {
-            this.cubeRoot.attach(cubie);
+            this.cubeRoot.attach(
+                cubie
+            );
         }
 
-        this.cubeRoot.remove(animation.pivot);
+        this.cubeRoot.remove(
+            animation.pivot
+        );
 
-        /*
-         * Resolve the Promise only after the transform has
-         * been completely transferred back to cubeRoot.
-         */
-        const resolve = animation.resolve;
+        const resolve =
+            animation.resolve;
 
         this.animation = null;
 
         resolve();
     }
 
-    setWholeCubeTransform(position, quaternion) {
-        this.cubeRoot.position.copy(position);
-        this.cubeRoot.quaternion.copy(quaternion);
+    setWholeCubeTransform(
+        position,
+        quaternion
+    ) {
+        this.cubeRoot.position.copy(
+            position
+        );
+
+        this.cubeRoot.quaternion.copy(
+            quaternion
+        );
     }
 
     resetWholeCubeTransform() {
-        this.cubeRoot.position.set(0, 0, 0);
-        this.cubeRoot.rotation.set(0, 0, 0);
+        this.cubeRoot.position.set(
+            0,
+            0,
+            0
+        );
+
+        this.cubeRoot.rotation.set(
+            0,
+            0,
+            0
+        );
     }
 
     rebuild(state) {
@@ -353,32 +456,56 @@ export class CubeRenderer {
 
         this.resetWholeCubeTransform();
 
+        /*
+         * Core always stays fixed inside cubeRoot.
+         * Only the cubies are rebuilt/repositioned.
+         */
         for (let slot = 0; slot < 8; ++slot) {
-            const identity = state.cp[slot];
-            const co = state.co[slot];
+            const identity =
+                state.cp[slot];
+
+            const co =
+                state.co[slot];
 
             const cubie =
                 this.cubies[identity];
 
+            /*
+             * Existing size and position are unchanged.
+             */
             cubie.position.set(
                 CORNERS[slot][0] * 0.51,
                 CORNERS[slot][1] * 0.51,
                 CORNERS[slot][2] * 0.51
             );
 
-            cubie.rotation.set(0, 0, 0);
+            cubie.rotation.set(
+                0,
+                0,
+                0
+            );
 
-            cubie.userData.slot = slot;
-            cubie.userData.orientation = co;
+            cubie.userData.slot =
+                slot;
 
-            while (cubie.children.length > 1) {
+            cubie.userData.orientation =
+                co;
+
+            /*
+             * Keep body, remove only stickers.
+             */
+            while (
+                cubie.children.length > 1
+            ) {
                 cubie.remove(
                     cubie.children[1]
                 );
             }
 
             const colors =
-                identityColors(identity);
+                identityColors(
+                    identity
+                );
 
             const dirs =
                 FACE_DIRS[slot];
@@ -403,14 +530,24 @@ export class CubeRenderer {
                         this.stickerMaterials[face]
                     );
 
+                /*
+                 * Existing sticker size/position
+                 * are unchanged.
+                 */
                 sticker.position.set(
                     normal[0] * 0.486,
                     normal[1] * 0.486,
                     normal[2] * 0.486
                 );
 
-                const [rx, ry, rz] =
-                    stickerRotation(normal);
+                const [
+                    rx,
+                    ry,
+                    rz
+                ] =
+                    stickerRotation(
+                        normal
+                    );
 
                 sticker.rotation.set(
                     rx,
@@ -418,7 +555,9 @@ export class CubeRenderer {
                     rz
                 );
 
-                cubie.add(sticker);
+                cubie.add(
+                    sticker
+                );
             }
         }
     }
@@ -433,14 +572,16 @@ export class CubeRenderer {
         const pivot =
             new THREE.Group();
 
-        this.cubeRoot.add(pivot);
+        this.cubeRoot.add(
+            pivot
+        );
 
         /*
-         * Make the hierarchy current before attach().
-         * This is especially important when a cubie is
-         * coming from a previously rotated position.
+         * Ensure the world matrices are current
+         * before attach().
          */
-        this.cubeRoot.updateMatrixWorld(true);
+        this.cubeRoot
+            .updateMatrixWorld(true);
 
         const affected =
             affectedPositions(move);
@@ -453,27 +594,39 @@ export class CubeRenderer {
                 const cubie =
                     this.cubies[identity];
 
-                pivot.attach(cubie);
+                pivot.attach(
+                    cubie
+                );
 
                 return cubie;
             });
 
-        /*
-         * The pivot must start from the exact identity
-         * transform. The attached cubies retain their
-         * world-space positions.
-         */
-        pivot.position.set(0, 0, 0);
-        pivot.quaternion.identity();
-        pivot.scale.set(1, 1, 1);
+        pivot.position.set(
+            0,
+            0,
+            0
+        );
 
-        pivot.updateMatrixWorld(true);
+        pivot.quaternion.identity();
+
+        pivot.scale.set(
+            1,
+            1,
+            1
+        );
+
+        pivot.updateMatrixWorld(
+            true
+        );
 
         this.pivot = pivot;
         this.moving = moving;
     }
 
-    animateMove(move, duration = 600) {
+    animateMove(
+        move,
+        duration = 600
+    ) {
         this.beginMove(move);
 
         let angle;
@@ -509,18 +662,29 @@ export class CubeRenderer {
                 );
         }
 
-        /*
-         * Reuse these vectors.
-         * No Vector3 allocation per animation frame.
-         */
         let axis;
 
         if (move <= 1) {
-            axis = new THREE.Vector3(1, 0, 0);
+            axis =
+                new THREE.Vector3(
+                    1,
+                    0,
+                    0
+                );
         } else if (move <= 3) {
-            axis = new THREE.Vector3(0, 1, 0);
+            axis =
+                new THREE.Vector3(
+                    0,
+                    1,
+                    0
+                );
         } else {
-            axis = new THREE.Vector3(0, 0, 1);
+            axis =
+                new THREE.Vector3(
+                    0,
+                    0,
+                    1
+                );
         }
 
         return new Promise(resolve => {
