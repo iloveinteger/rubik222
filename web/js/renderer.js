@@ -2,25 +2,25 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.m
 import { affectedPositions } from "./cube.js";
 
 const CORNERS = [
-    [ 1, 1, 1], // 0 URF
-    [-1, 1, 1], // 1 UFL
-    [-1, 1,-1], // 2 ULB
-    [ 1, 1,-1], // 3 UBR
-    [ 1,-1, 1], // 4 DFR
-    [-1,-1, 1], // 5 DLF
-    [-1,-1,-1], // 6 DBL
-    [ 1,-1,-1], // 7 DRB
+    [1, 1, 1],    // 0 URF
+    [-1, 1, 1],   // 1 UFL
+    [-1, 1, -1],  // 2 ULB
+    [1, 1, -1],   // 3 UBR
+    [1, -1, 1],   // 4 DFR
+    [-1, -1, 1],  // 5 DLF
+    [-1, -1, -1], // 6 DBL
+    [1, -1, -1],  // 7 DRB
 ];
 
 const FACE_DIRS = [
-    [[ 0, 1, 0],[ 1, 0, 0],[ 0, 0, 1]],
-    [[ 0, 1, 0],[ 0, 0, 1],[-1, 0, 0]],
-    [[ 0, 1, 0],[-1, 0, 0],[ 0, 0,-1]],
-    [[ 0, 1, 0],[ 0, 0,-1],[ 1, 0, 0]],
-    [[ 0,-1, 0],[ 0, 0, 1],[ 1, 0, 0]],
-    [[ 0,-1, 0],[-1, 0, 0],[ 0, 0, 1]],
-    [[ 0,-1, 0],[ 0, 0,-1],[-1, 0, 0]],
-    [[ 0,-1, 0],[ 1, 0, 0],[ 0, 0,-1]],
+    [[0, 1, 0], [1, 0, 0], [0, 0, 1]],
+    [[0, 1, 0], [0, 0, 1], [-1, 0, 0]],
+    [[0, 1, 0], [-1, 0, 0], [0, 0, -1]],
+    [[0, 1, 0], [0, 0, -1], [1, 0, 0]],
+    [[0, -1, 0], [0, 0, 1], [1, 0, 0]],
+    [[0, -1, 0], [-1, 0, 0], [0, 0, 1]],
+    [[0, -1, 0], [0, 0, -1], [-1, 0, 0]],
+    [[0, -1, 0], [1, 0, 0], [0, 0, -1]],
 ];
 
 const FACE_COLOR = {
@@ -72,23 +72,6 @@ function createCubieGeometry() {
         0.96,
         0.96,
         0.96
-    );
-}
-
-/*
- * Black core behind the cubies.
- *
- * Cubie centers are at ±0.51 and cubie size is 0.96,
- * so the outer cubie surface reaches ±0.99.
- *
- * The core reaches ±1.00, leaving it just behind the
- * cubie surfaces while filling the gaps between cubies.
- */
-function createCoreGeometry() {
-    return new THREE.BoxGeometry(
-        2.0,
-        2.0,
-        2.0
     );
 }
 
@@ -206,29 +189,6 @@ export class CubeRenderer {
         this.scene.add(
             this.cubeRoot
         );
-
-        /*
-         * Black core.
-         *
-         * This is a real 3D object, not empty space.
-         * Therefore the black gap remains visible even
-         * when another cubie's sticker rotates over it.
-         */
-        // this.coreGeometry =
-        //     createCoreGeometry();
-
-        // this.coreMaterial =
-        //     createBodyMaterial();
-
-        // this.core =
-        //     new THREE.Mesh(
-        //         this.coreGeometry,
-        //         this.coreMaterial
-        //     );
-
-        // this.cubeRoot.add(
-        //     this.core
-        // );
 
         this.stickerGeometry =
             createStickerGeometry();
@@ -456,10 +416,6 @@ export class CubeRenderer {
 
         this.resetWholeCubeTransform();
 
-        /*
-         * Core always stays fixed inside cubeRoot.
-         * Only the cubies are rebuilt/repositioned.
-         */
         for (let slot = 0; slot < 8; ++slot) {
             const identity =
                 state.cp[slot];
@@ -470,9 +426,6 @@ export class CubeRenderer {
             const cubie =
                 this.cubies[identity];
 
-            /*
-             * Existing size and position are unchanged.
-             */
             cubie.position.set(
                 CORNERS[slot][0] * 0.51,
                 CORNERS[slot][1] * 0.51,
@@ -530,10 +483,6 @@ export class CubeRenderer {
                         this.stickerMaterials[face]
                     );
 
-                /*
-                 * Existing sticker size/position
-                 * are unchanged.
-                 */
                 sticker.position.set(
                     normal[0] * 0.486,
                     normal[1] * 0.486,
