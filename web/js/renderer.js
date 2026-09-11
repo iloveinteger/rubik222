@@ -27,7 +27,9 @@ const FACE_COLOR = {
 };
 
 const CUBE_HALF = 0.51;
-const CUBE_BOUND_RADIUS = CUBE_HALF * Math.sqrt(3);
+const CUBIE_HALF = 0.48;
+// Conservative radius of the actual rendered cube (including the 0.96 cubie bodies).
+const CUBE_BOUND_RADIUS = Math.sqrt(3) * (CUBE_HALF + CUBIE_HALF);
 const OFFSCREEN_MARGIN_PX = 24;
 const SOLVE_COVERAGE_Y = 1.2;
 
@@ -262,12 +264,35 @@ export class CubeRenderer {
             OFFSCREEN_MARGIN_PX / height;
     }
 
+    getCameraUpY() {
+        // Moving the cube along world Y does not move it 1:1 in screen Y because
+        // the camera is tilted. Convert a world-Y displacement into camera-up
+        // displacement so the offscreen test is actually in screen space.
+        return Math.abs(
+            new THREE.Vector3(0, 1, 0)
+                .applyQuaternion(this.camera.quaternion)
+                .normalize()
+                .y
+        );
+    }
+
+    getOffscreenYMagnitude() {
+        const screenMargin = this.getOffscreenMarginWorld();
+        const requiredScreenY =
+            Math.max(this.camera.top, -this.camera.bottom) +
+            CUBE_BOUND_RADIUS +
+            screenMargin;
+
+        const cameraUpY = Math.max(this.getCameraUpY(), 1e-6);
+        return requiredScreenY / cameraUpY;
+    }
+
     getEntranceY() {
-        return this.camera.top + CUBE_BOUND_RADIUS + this.getOffscreenMarginWorld();
+        return this.getOffscreenYMagnitude();
     }
 
     getExitY() {
-        return this.camera.bottom - CUBE_BOUND_RADIUS - this.getOffscreenMarginWorld();
+        return -this.getOffscreenYMagnitude();
     }
 
     canStartSolve() {
