@@ -96,23 +96,12 @@ body {
     text-align: center;
     white-space: nowrap;
 
-    /*
-     * Text only.
-     * No background or container-like visual.
-     */
     background: transparent;
-    background-color: transparent;
-
     border: none;
     border-radius: 0;
     box-shadow: none;
-
     backdrop-filter: none;
-    -webkit-backdrop-filter: none;
 
-    /*
-     * Shadow belongs to the text itself.
-     */
     text-shadow:
         0 1px 8px rgba(0, 0, 0, 0.55);
 
@@ -120,6 +109,21 @@ body {
     user-select: none;
 }
 
+@media (max-width: 600px) {
+    #status {
+        bottom: 22px;
+        font-size: 14px;
+    }
+}
+
+@media (max-width: 600px) {
+    #status {
+        bottom: 22px;
+        font-size: 14px;
+    }
+}
+
+/* Slightly smaller typography on narrow screens. */
 @media (max-width: 600px) {
     #status {
         bottom: 22px;
