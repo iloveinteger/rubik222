@@ -152,9 +152,9 @@ export class CubeRenderer {
             const cubie = this.cubies[identity];
 
             cubie.position.set(
-                CORNERS[slot][0] * 1.02,
-                CORNERS[slot][1] * 1.02,
-                CORNERS[slot][2] * 1.02
+                CORNERS[slot][0] * 0.51,
+                CORNERS[slot][1] * 0.51,
+                CORNERS[slot][2] * 0.51
             );
             cubie.rotation.set(0, 0, 0);
             cubie.userData.slot = slot;
