@@ -81,7 +81,7 @@ async function solveCurrentCube() {
                 `${MOVE_NAMES[move]} · ${solutionIndex + 1}/${solution.length}`
             );
 
-            await renderer.animateMove(move, 360);
+            await renderer.animateMove(move);
 
             currentState = applyMove(currentState, move);
             renderer.rebuild(currentState);
