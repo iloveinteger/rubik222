@@ -15,11 +15,6 @@ body {
 
     color: #fff;
 
-    /*
-     * Modern geometric sans-serif stack.
-     * Pretendard / Noto Sans KR will be used when available,
-     * with system fallbacks otherwise.
-     */
     font-family:
         Pretendard,
         "Noto Sans KR",
@@ -58,17 +53,21 @@ body {
     width: 100%;
     height: 100%;
 
-    /*
-     * Prevent the browser from introducing interpolation
-     * when the canvas is resized.
-     */
     image-rendering: auto;
 }
 
+/*
+ * Status text
+ *
+ * The status element itself has absolutely no background,
+ * border, shadow, or backdrop. Only the text is rendered.
+ */
 #status {
     position: absolute;
+
     left: 50%;
     bottom: 30px;
+
     transform: translateX(-50%);
 
     width: max-content;
@@ -78,7 +77,6 @@ body {
     padding: 0;
 
     color: #ffffff;
-    opacity: 1;
 
     font-family:
         "Noto Sans KR",
@@ -91,17 +89,35 @@ body {
     font-size: 15px;
     font-weight: 500;
     line-height: 1.4;
+
     letter-spacing: -0.025em;
 
     text-align: center;
     white-space: nowrap;
 
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-    backdrop-filter: none;
+    /*
+     * Completely transparent background.
+     */
+    background: none !important;
+    background-color: transparent !important;
 
+    /*
+     * No box styling.
+     */
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+
+    /*
+     * No glass / blur effect.
+     */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+
+    /*
+     * Slight text shadow only.
+     * This affects the glyphs, not the surrounding box.
+     */
     text-shadow:
         0 1px 8px rgba(0, 0, 0, 0.55);
 
@@ -109,21 +125,6 @@ body {
     user-select: none;
 }
 
-@media (max-width: 600px) {
-    #status {
-        bottom: 22px;
-        font-size: 14px;
-    }
-}
-
-@media (max-width: 600px) {
-    #status {
-        bottom: 22px;
-        font-size: 14px;
-    }
-}
-
-/* Slightly smaller typography on narrow screens. */
 @media (max-width: 600px) {
     #status {
         bottom: 22px;
@@ -135,7 +136,6 @@ body {
     }
 }
 
-/* Respect users who prefer reduced motion. */
 @media (prefers-reduced-motion: reduce) {
     #status {
         transition: none;
