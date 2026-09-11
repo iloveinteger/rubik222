@@ -8,85 +8,65 @@ export function springMotion({
     from,
     to = new THREE.Vector3(0, 0, 0),
     initialVelocity = new THREE.Vector3(0, -2, 0),
-    duration = 1350,
     stiffness = 42,
     damping = 10,
-    gravity = 0,
     onUpdate,
 }) {
     const position = from.clone();
     const velocity = initialVelocity.clone();
-    const start = performance.now();
-    let last = start;
+
+    let last = performance.now();
 
     return new Promise(resolve => {
         const frame = now => {
-            const dt = Math.min(0.032, Math.max(0.001, (now - last) / 1000));
+            const dt = Math.min(
+                0.032,
+                Math.max(0.001, (now - last) / 1000)
+            );
+
             last = now;
 
-            const acceleration = to.clone().sub(position).multiplyScalar(stiffness);
-            acceleration.y += gravity;
-            acceleration.addScaledVector(velocity, -damping);
+            // Spring force toward the target.
+            const acceleration = to
+                .clone()
+                .sub(position)
+                .multiplyScalar(stiffness);
+
+            // Damping force.
+            acceleration.addScaledVector(
+                velocity,
+                -damping
+            );
 
             velocity.addScaledVector(acceleration, dt);
             position.addScaledVector(velocity, dt);
 
             if (onUpdate) {
-                onUpdate(position, now - start);
+                onUpdate(position, now);
             } else {
                 object.position.copy(position);
             }
 
-            const elapsed = now - start;
-
+            // Finish only when the cube is both very close to the
+            // target and moving very slowly.
             const settled =
-                elapsed >= duration ||
-                (
-                    position.distanceTo(to) < 0.008 &&
-                    velocity.length() < 0.02
-                );
+                position.distanceTo(to) < 0.008 &&
+                velocity.length() < 0.02;
 
             if (!settled) {
                 requestAnimationFrame(frame);
                 return;
             }
 
-            // Do not snap directly to the target.
-            // Give the final tiny error a short smooth settle.
-            const settleStart = performance.now();
-            const settleFrom = position.clone();
+            // Remove only the tiny numerical residual.
+            // At this point the cube is already visually stationary.
+            if (onUpdate) {
+                onUpdate(to, now);
+            } else {
+                object.position.copy(to);
+            }
 
-            const settleFrame = current => {
-                const t = Math.min(
-                    1,
-                    (current - settleStart) / 120
-                );
-
-                // Smoothstep
-                const e = t * t * (3 - 2 * t);
-
-                const finalPosition = settleFrom.clone().lerp(to, e);
-
-                if (onUpdate) {
-                    onUpdate(finalPosition, duration);
-                } else {
-                    object.position.copy(finalPosition);
-                }
-
-                if (t < 1) {
-                    requestAnimationFrame(settleFrame);
-                } else {
-                    if (onUpdate) {
-                        onUpdate(to, duration);
-                    } else {
-                        object.position.copy(to);
-                    }
-
-                    resolve();
-                }
-            };
-
-            requestAnimationFrame(settleFrame);
+            resolve();
         };
 
         requestAnimationFrame(frame);
@@ -97,28 +77,49 @@ export async function enterCube(renderer) {
     const h = renderer.container.clientHeight;
     const spawnY = Math.max(5.0, 3.8 + h / 260);
 
-    renderer.cubeRoot.position.set(0, spawnY, 0);
-    renderer.cubeRoot.rotation.set(-0.32, 0.45, 0.18);
+    renderer.cubeRoot.position.set(
+        0,
+        spawnY,
+        0
+    );
+
+    renderer.cubeRoot.rotation.set(
+        -0.32,
+        0.45,
+        0.18
+    );
 
     const startQ = renderer.cubeRoot.quaternion.clone();
     const targetQ = new THREE.Quaternion().identity();
 
+    const animationStart = performance.now();
+
     await springMotion({
         object: renderer.cubeRoot,
         from: renderer.cubeRoot.position.clone(),
-        initialVelocity: new THREE.Vector3(0, -2.2, 0),
+
+        initialVelocity: new THREE.Vector3(
+            0,
+            -2.2,
+            0
+        ),
+
         stiffness: 42,
         damping: 10,
-        gravity: -2.2,
-        duration: 1350,
 
-        onUpdate: (position, elapsed) => {
+        onUpdate: (position, now) => {
             renderer.cubeRoot.position.copy(position);
 
-            const t = Math.min(1, elapsed / 1350);
+            // Rotation settles smoothly during the fall.
+            const elapsed = now - animationStart;
+            const t = Math.min(
+                1,
+                elapsed / 1350
+            );
 
-            // Smooth rotational settling.
-            const eased = t * t * (3 - 2 * t);
+            // Smoothstep.
+            const eased =
+                t * t * (3 - 2 * t);
 
             renderer.cubeRoot.quaternion.slerpQuaternions(
                 startQ,
@@ -127,15 +128,14 @@ export async function enterCube(renderer) {
             );
         },
     });
-
-    renderer.cubeRoot.position.set(0, 0, 0);
-    renderer.cubeRoot.quaternion.identity();
 }
 
 export async function exitCube(renderer) {
-    const start = renderer.cubeRoot.position.clone();
+    const start =
+        renderer.cubeRoot.position.clone();
 
-    const h = renderer.container.clientHeight;
+    const h =
+        renderer.container.clientHeight;
 
     const end = new THREE.Vector3(
         0,
@@ -146,7 +146,8 @@ export async function exitCube(renderer) {
     const startTime = performance.now();
     const duration = 620;
 
-    const startQ = renderer.cubeRoot.quaternion.clone();
+    const startQ =
+        renderer.cubeRoot.quaternion.clone();
 
     return new Promise(resolve => {
         const frame = now => {
@@ -166,7 +167,11 @@ export async function exitCube(renderer) {
             const q = new THREE.Quaternion();
 
             q.setFromAxisAngle(
-                new THREE.Vector3(0.7, 0.25, 0.55).normalize(),
+                new THREE.Vector3(
+                    0.7,
+                    0.25,
+                    0.55
+                ).normalize(),
                 0.9 * t
             );
 
