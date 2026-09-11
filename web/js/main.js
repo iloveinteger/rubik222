@@ -1,4 +1,3 @@
-```js
 import { randomState, solvedState, MOVE_NAMES, applyMove } from "./cube.js";
 import { OptimalSolver } from "./solver.js";
 import { CubeRenderer } from "./renderer.js";
@@ -117,4 +116,3 @@ loadSolver().catch(error => {
     solverReady = false;
     setStatus("Failed to load optimal_move.bin");
 });
-```
