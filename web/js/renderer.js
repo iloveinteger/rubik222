@@ -2,14 +2,8 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.m
 import { affectedPositions } from "./cube.js";
 
 const CORNERS = [
-    [1, 1, 1],
-    [-1, 1, 1],
-    [-1, 1, -1],
-    [1, 1, -1],
-    [1, -1, 1],
-    [-1, -1, 1],
-    [-1, -1, -1],
-    [1, -1, -1],
+    [1, 1, 1], [-1, 1, 1], [-1, 1, -1], [1, 1, -1],
+    [1, -1, 1], [-1, -1, 1], [-1, -1, -1], [1, -1, -1],
 ];
 
 const FACE_DIRS = [
@@ -32,27 +26,41 @@ const FACE_COLOR = {
     B: 0x3c6dcc,
 };
 
+const CUBE_HALF = 0.51;
+const CUBE_BOUND_RADIUS = CUBE_HALF * Math.sqrt(3);
+const OFFSCREEN_MARGIN_PX = 24;
+const SOLVE_COVERAGE_Y = 1.2;
+
+const MOVE_DURATION = 600;
+const ROTATION_DURATION = 1350;
+const EXIT_DURATION = 800;
+
+const SPRING_STIFFNESS = 10.5;
+const SPRING_DAMPING = 5;
+const INITIAL_VERTICAL_VELOCITY = -1.3;
+const PHYSICS_STEP = 0.016;
+const MAX_PHYSICS_ELAPSED = 0.1;
+
+const SPEED_CAP = 1.2;
+const SPEED_SAMPLES = 1024;
+
 function faceName(normal) {
     const [x, y, z] = normal;
-
     if (y > 0) return "U";
     if (y < 0) return "D";
     if (x > 0) return "R";
     if (x < 0) return "L";
     if (z > 0) return "F";
-
     return "B";
 }
 
 function stickerRotation(normal) {
     const [x, y, z] = normal;
-
     if (z > 0) return [0, 0, 0];
     if (z < 0) return [0, Math.PI, 0];
     if (x > 0) return [0, Math.PI / 2, 0];
     if (x < 0) return [0, -Math.PI / 2, 0];
     if (y > 0) return [-Math.PI / 2, 0, 0];
-
     return [Math.PI / 2, 0, 0];
 }
 
@@ -60,1196 +68,460 @@ function identityColors(identity) {
     return FACE_DIRS[identity].map(faceName);
 }
 
-function createStickerGeometry() {
-    return new THREE.PlaneGeometry(
-        0.78,
-        0.78
+function randomRange(min, max) {
+    return min + Math.random() * (max - min);
+}
+
+function randomRotVector() {
+    const minLimit = 0.3 * Math.PI;
+    const maxLimit = 0.9 * Math.PI;
+
+    let amount = randomRange(minLimit, maxLimit);
+    if (Math.random() < 0.5) amount = -amount;
+
+    const theta = randomRange(0, 2 * Math.PI);
+    const z = randomRange(-1, 1);
+    const r = Math.sqrt(1 - z * z);
+
+    return new THREE.Vector3(
+        r * Math.cos(theta) * amount,
+        r * Math.sin(theta) * amount,
+        z * amount
     );
 }
 
-function createCubieGeometry() {
-    return new THREE.BoxGeometry(
-        0.96,
-        0.96,
-        0.96
+function rotationVectorToQuaternion(v, out) {
+    const length = v.length();
+    if (length < 1e-8) {
+        out.identity();
+        return out;
+    }
+
+    const axis = new THREE.Vector3(
+        v.x / length,
+        v.y / length,
+        v.z / length
     );
+
+    out.setFromAxisAngle(axis, length);
+    return out;
 }
-
-function createStickerMaterials() {
-    const materials = {};
-
-    for (const [face, color] of Object.entries(FACE_COLOR)) {
-        materials[face] =
-            new THREE.MeshBasicMaterial({
-                color,
-                side: THREE.FrontSide,
-            });
-    }
-
-    return materials;
-}
-
-function createBodyMaterial() {
-    return new THREE.MeshBasicMaterial({
-        color: 0x101010,
-    });
-}
-
-function makeCubie(
-    identity,
-    bodyGeometry,
-    bodyMaterial,
-    stickerGeometry,
-    stickerMaterials
-) {
-    const group = new THREE.Group();
-
-    group.userData.identity = identity;
-
-    const body =
-        new THREE.Mesh(
-            bodyGeometry,
-            bodyMaterial
-        );
-
-    group.add(body);
-
-    /*
-     * Pre-create all three stickers.
-     *
-     * They are reused by rebuild() instead of creating
-     * and destroying Mesh objects every time.
-     */
-    for (let i = 0; i < 3; ++i) {
-        const sticker =
-            new THREE.Mesh(
-                stickerGeometry,
-                stickerMaterials.U
-            );
-
-        sticker.visible = false;
-        group.add(sticker);
-    }
-
-    return group;
-}
-
-/*
- * Move animation velocity cap.
- *
- * The original smootherstep derivative has a maximum
- * normalized velocity of 1.875.
- *
- * We cap the velocity and integrate it once into a
- * normalized cumulative position profile.
- */
-const SPEED_CAP = 1.2;
-const SPEED_SAMPLES = 1024;
 
 function createSpeedProfile(cap) {
-    const values =
-        new Float64Array(
-            SPEED_SAMPLES + 1
-        );
-
-    for (
-        let i = 0;
-        i <= SPEED_SAMPLES;
-        ++i
-    ) {
-        const t =
-            i / SPEED_SAMPLES;
-
-        const raw =
-            30 *
-            t *
-            t *
-            (1 - t) *
-            (1 - t);
-
-        values[i] =
-            Math.min(
-                raw,
-                cap
-            );
+    const values = new Float64Array(SPEED_SAMPLES + 1);
+    for (let i = 0; i <= SPEED_SAMPLES; ++i) {
+        const t = i / SPEED_SAMPLES;
+        const raw = 30 * t * t * (1 - t) * (1 - t);
+        values[i] = Math.min(raw, cap);
     }
 
-    const cumulative =
-        new Float64Array(
-            SPEED_SAMPLES + 1
-        );
+    const cumulative = new Float64Array(SPEED_SAMPLES + 1);
+    const dt = 1 / SPEED_SAMPLES;
 
-    const dt =
-        1 / SPEED_SAMPLES;
-
-    for (
-        let i = 1;
-        i <= SPEED_SAMPLES;
-        ++i
-    ) {
-        cumulative[i] =
-            cumulative[i - 1] +
-            (
-                values[i - 1] +
-                values[i]
-            ) *
-            0.5 *
-            dt;
+    for (let i = 1; i <= SPEED_SAMPLES; ++i) {
+        cumulative[i] = cumulative[i - 1] +
+            (values[i - 1] + values[i]) * 0.5 * dt;
     }
 
-    const total =
-        cumulative[SPEED_SAMPLES];
-
-    for (
-        let i = 0;
-        i <= SPEED_SAMPLES;
-        ++i
-    ) {
+    const total = cumulative[SPEED_SAMPLES];
+    for (let i = 0; i <= SPEED_SAMPLES; ++i) {
         cumulative[i] /= total;
     }
 
     return cumulative;
 }
 
-const MOVE_SPEED_PROFILE =
-    createSpeedProfile(
-        SPEED_CAP
-    );
+const MOVE_SPEED_PROFILE = createSpeedProfile(SPEED_CAP);
 
 function cappedEasing(t) {
-    if (t <= 0) {
-        return 0;
-    }
+    if (t <= 0) return 0;
+    if (t >= 1) return 1;
 
-    if (t >= 1) {
-        return 1;
-    }
+    const position = t * SPEED_SAMPLES;
+    const index = Math.floor(position);
+    const fraction = position - index;
+    const a = MOVE_SPEED_PROFILE[index];
+    const b = MOVE_SPEED_PROFILE[index + 1];
 
-    const position =
-        t * SPEED_SAMPLES;
-
-    const index =
-        Math.floor(position);
-
-    const fraction =
-        position - index;
-
-    const a =
-        MOVE_SPEED_PROFILE[index];
-
-    const b =
-        MOVE_SPEED_PROFILE[index + 1];
-
-    return (
-        a +
-        (b - a) * fraction
-    );
-}
-
-function randomRange(min, max) {
-    return (
-        min +
-        Math.random() *
-        (max - min)
-    );
-}
-
-function randomEntranceQuaternion() {
-    /*
-     * Keep X/Z moderate so the cube does not enter
-     * at an absurdly tilted angle, while Y can rotate
-     * through the full circle.
-     */
-    const euler =
-        new THREE.Euler(
-            randomRange(
-                -0.55,
-                0.55
-            ),
-            randomRange(
-                -Math.PI,
-                Math.PI
-            ),
-            randomRange(
-                -0.55,
-                0.55
-            ),
-            "XYZ"
-        );
-
-    return new THREE.Quaternion()
-        .setFromEuler(euler);
-}
-
-function randomExitAxis(target) {
-    target.set(
-        randomRange(-1, 1),
-        randomRange(-1, 1),
-        randomRange(-1, 1)
-    );
-
-    if (target.lengthSq() < 0.01) {
-        target.set(
-            0.7,
-            0.25,
-            0.55
-        );
-    }
-
-    target.normalize();
-
-    return target;
+    return a + (b - a) * fraction;
 }
 
 export class CubeRenderer {
     constructor(container) {
-        this.container =
-            container;
+        this.container = container;
 
-        this.scene =
-            new THREE.Scene();
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x0b0b0b);
 
-        this.scene.background =
-            new THREE.Color(
-                0x0b0b0b
-            );
+        this.camera = new THREE.OrthographicCamera(-4, 4, 4.5, -4.5, 0.1, 100);
+        this.camera.position.set(6, 6, 6);
+        this.camera.lookAt(0, 0, 0);
 
-        this.camera =
-            new THREE.OrthographicCamera(
-                -4,
-                4,
-                4,
-                -4,
-                0.1,
-                100
-            );
-
-        this.camera.position.set(
-            6,
-            6,
-            6
-        );
-
-        this.camera.lookAt(
-            0,
-            0,
-            0
-        );
-
-        this.renderer =
-            new THREE.WebGLRenderer({
-                antialias: true,
-                alpha: false,
-                powerPreference:
-                    "high-performance",
-                preserveDrawingBuffer:
-                    false,
-            });
-
-        this.renderer.outputColorSpace =
-            THREE.SRGBColorSpace;
-
-        this.renderer.shadowMap.enabled =
-            false;
-
-        this.renderer.setPixelRatio(
-            Math.min(
-                window.devicePixelRatio || 1,
-                2
-            )
-        );
-
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: false,
+            powerPreference: "high-performance",
+            preserveDrawingBuffer: false,
+        });
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this.renderer.setSize(
-            Math.max(
-                1,
-                container.clientWidth
-            ),
-            Math.max(
-                1,
-                container.clientHeight
-            ),
+            Math.max(1, container.clientWidth),
+            Math.max(1, container.clientHeight),
             false
         );
+        container.appendChild(this.renderer.domElement);
 
-        container.appendChild(
-            this.renderer.domElement
-        );
+        this.cubeRoot = new THREE.Group();
+        this.scene.add(this.cubeRoot);
 
-        this.cubeRoot =
-            new THREE.Group();
+        this.bodyGeometry = new THREE.BoxGeometry(0.96, 0.96, 0.96);
+        this.stickerGeometry = new THREE.PlaneGeometry(0.78, 0.78);
+        this.bodyMaterial = new THREE.MeshBasicMaterial({ color: 0x101010 });
+        this.stickerMaterials = {};
 
-        this.scene.add(
-            this.cubeRoot
-        );
-
-        this.stickerGeometry =
-            createStickerGeometry();
-
-        this.bodyGeometry =
-            createCubieGeometry();
-
-        this.stickerMaterials =
-            createStickerMaterials();
-
-        this.bodyMaterial =
-            createBodyMaterial();
-
-        this.cubies =
-            Array.from(
-                { length: 8 },
-                (_, identity) =>
-                    makeCubie(
-                        identity,
-                        this.bodyGeometry,
-                        this.bodyMaterial,
-                        this.stickerGeometry,
-                        this.stickerMaterials
-                    )
-            );
-
-        for (const cubie of this.cubies) {
-            this.cubeRoot.add(cubie);
+        for (const [face, color] of Object.entries(FACE_COLOR)) {
+            this.stickerMaterials[face] = new THREE.MeshBasicMaterial({
+                color,
+                side: THREE.FrontSide,
+            });
         }
 
-        /*
-         * Shared axes.
-         */
-        this.axisX =
-            new THREE.Vector3(
-                1,
-                0,
-                0
-            );
+        this.cubies = Array.from({ length: 8 }, (_, identity) => {
+            const group = new THREE.Group();
+            group.userData.identity = identity;
 
-        this.axisY =
-            new THREE.Vector3(
-                0,
-                1,
-                0
-            );
+            group.add(new THREE.Mesh(this.bodyGeometry, this.bodyMaterial));
 
-        this.axisZ =
-            new THREE.Vector3(
-                0,
-                0,
-                1
-            );
+            for (let i = 0; i < 3; ++i) {
+                const sticker = new THREE.Mesh(
+                    this.stickerGeometry,
+                    this.stickerMaterials.U
+                );
+                sticker.visible = false;
+                group.add(sticker);
+            }
 
-        /*
-         * Reusable transition objects.
-         */
-        this.transitionPosition =
-            new THREE.Vector3();
+            this.cubeRoot.add(group);
+            return group;
+        });
 
-        this.transitionVelocity =
-            new THREE.Vector3();
+        this.state = null;
+        this.animation = null;
+        this.entrance = null;
+        this.exit = null;
 
-        this.transitionTarget =
-            new THREE.Vector3();
+        this.axisX = new THREE.Vector3(1, 0, 0);
+        this.axisY = new THREE.Vector3(0, 1, 0);
+        this.axisZ = new THREE.Vector3(0, 0, 1);
 
-        this.transitionStartQuaternion =
-            new THREE.Quaternion();
+        this.tmpQuaternion = new THREE.Quaternion();
+        this.tmpAxis = new THREE.Vector3();
+        this.tmpVector = new THREE.Vector3();
+        this.tmpVector2 = new THREE.Vector3();
 
-        this.transitionTargetQuaternion =
-            new THREE.Quaternion();
-
-        this.transitionQuaternion =
-            new THREE.Quaternion();
-
-        this.transitionAxis =
-            new THREE.Vector3();
-
-        this.transition =
-            null;
-
-        this.animation =
-            null;
-
-        this.state =
-            null;
-
-        this.lastAnimationTime =
-            0;
-
-        this.resizeObserver =
-            new ResizeObserver(() => {
-                this.resize();
-            });
-
-        this.resizeObserver.observe(
-            container
-        );
-
+        this.resizeObserver = new ResizeObserver(() => this.resize());
+        this.resizeObserver.observe(container);
         this.resize();
 
-        this.renderLoop =
-            this.renderLoop.bind(this);
-
-        requestAnimationFrame(
-            this.renderLoop
-        );
+        this.renderLoop = this.renderLoop.bind(this);
+        requestAnimationFrame(this.renderLoop);
     }
 
     resize() {
-        const width =
-            Math.max(
-                1,
-                this.container.clientWidth
-            );
+        const width = Math.max(1, this.container.clientWidth);
+        const height = Math.max(1, this.container.clientHeight);
+        const aspect = width / height;
+        const verticalHalf = 4.5;
 
-        const height =
-            Math.max(
-                1,
-                this.container.clientHeight
-            );
-
-        const aspect =
-            width / height;
-
-        const size =
-            4.5;
-
-        this.camera.left =
-            -size * aspect;
-
-        this.camera.right =
-            size * aspect;
-
-        this.camera.top =
-            size;
-
-        this.camera.bottom =
-            -size;
-
+        this.camera.left = -verticalHalf * aspect;
+        this.camera.right = verticalHalf * aspect;
+        this.camera.top = verticalHalf;
+        this.camera.bottom = -verticalHalf;
         this.camera.updateProjectionMatrix();
 
-        this.renderer.setPixelRatio(
-            Math.min(
-                window.devicePixelRatio || 1,
-                2
-            )
-        );
-
-        this.renderer.setSize(
-            width,
-            height,
-            false
-        );
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setSize(width, height, false);
     }
 
     renderLoop(now) {
         this.updateAnimation(now);
-
-        this.renderer.render(
-            this.scene,
-            this.camera
-        );
-
-        requestAnimationFrame(
-            this.renderLoop
-        );
+        this.renderer.render(this.scene, this.camera);
+        requestAnimationFrame(this.renderLoop);
     }
 
     updateAnimation(now) {
-        if (this.transition) {
-            this.updateTransition(now);
-        }
-
-        if (this.animation) {
-            this.updateMoveAnimation(now);
-        }
+        if (this.entrance) this.updateEntrance(now);
+        if (this.exit) this.updateExit(now);
+        if (this.animation) this.updateMoveAnimation(now);
     }
 
-    /*
-     * ---------------------------------------------------------
-     * Whole-cube entrance / exit animation
-     * ---------------------------------------------------------
-     */
+    getOffscreenMarginWorld() {
+        const height = Math.max(1, this.container.clientHeight);
+        return (this.camera.top - this.camera.bottom) *
+            OFFSCREEN_MARGIN_PX / height;
+    }
+
+    getEntranceY() {
+        return this.camera.top + CUBE_BOUND_RADIUS + this.getOffscreenMarginWorld();
+    }
+
+    getExitY() {
+        return this.camera.bottom - CUBE_BOUND_RADIUS - this.getOffscreenMarginWorld();
+    }
+
+    canStartSolve() {
+        if (!this.entrance) return true;
+        return Math.abs(this.entrance.position.y) <= SOLVE_COVERAGE_Y;
+    }
+
+    isEntranceActive() {
+        return !!this.entrance;
+    }
 
     startEntrance() {
-        if (
-            this.transition ||
-            this.animation
-        ) {
-            return Promise.reject(
-                new Error(
-                    "Another animation is running."
-                )
-            );
+        if (this.entrance || this.exit) {
+            return Promise.reject(new Error("Transition already running."));
         }
 
-        const height =
-            this.container.clientHeight;
+        const startRotation = randomRotVector();
+        const startQuaternion = new THREE.Quaternion();
+        rotationVectorToQuaternion(startRotation, startQuaternion);
 
-        /*
-         * Bounding sphere radius of the cube.
-         *
-         * The actual cube extends to approximately 0.51
-         * on each axis, so:
-         *
-         *     0.51 * sqrt(3) ~= 0.88335
-         *
-         * This keeps the entire rotated cube outside the
-         * viewport before the entrance begins.
-         */
-        const cubeBoundRadius =
-            0.88335;
+        const now = performance.now();
 
-        const scale =
-            Math.min(
-                this.container.clientWidth,
-                height
-            ) * 0.11;
+        this.cubeRoot.position.set(0, this.getEntranceY(), 0);
+        this.cubeRoot.quaternion.copy(startQuaternion);
 
-        const margin =
-            24;
-
-        const spawnY =
-            (
-                height * 0.45 +
-                margin
-            ) / scale +
-            cubeBoundRadius;
-
-        this.transitionPosition.set(
-            0,
-            spawnY,
-            0
-        );
-
-        this.transitionVelocity.set(
-            0,
-            -1.3,
-            0
-        );
-
-        this.transitionTarget.set(
-            0,
-            0,
-            0
-        );
-
-        this.transitionStartQuaternion.copy(
-            randomEntranceQuaternion()
-        );
-
-        this.transitionTargetQuaternion.identity();
-
-        this.cubeRoot.position.copy(
-            this.transitionPosition
-        );
-
-        this.cubeRoot.quaternion.copy(
-            this.transitionStartQuaternion
-        );
-
-        /*
-         * Physics uses real elapsed time.
-         *
-         * k = 10.5
-         * c = 5
-         */
-        this.transition = {
-            type: "entrance",
-            lastTime:
-                performance.now(),
+        this.entrance = {
+            position: this.cubeRoot.position.clone(),
+            velocity: new THREE.Vector3(0, INITIAL_VERTICAL_VELOCITY, 0),
+            target: new THREE.Vector3(0, 0, 0),
+            startQuaternion,
+            targetQuaternion: new THREE.Quaternion(),
+            startTime: now,
+            lastPhysicsTime: now,
+            physicsAccumulator: 0,
             springFinished: false,
-            rotationDuration: 1350,
-            startTime:
-                performance.now(),
+            rotationFinished: false,
             resolve: null,
         };
 
         return new Promise(resolve => {
-            this.transition.resolve =
-                resolve;
+            this.entrance.resolve = resolve;
         });
+    }
+
+    updateEntrance(now) {
+        const entrance = this.entrance;
+        if (!entrance) return;
+
+        let elapsed = (now - entrance.lastPhysicsTime) / 1000;
+        entrance.lastPhysicsTime = now;
+        elapsed = Math.min(Math.max(elapsed, 0), MAX_PHYSICS_ELAPSED);
+        entrance.physicsAccumulator += elapsed;
+
+        while (entrance.physicsAccumulator >= PHYSICS_STEP) {
+            this.updateEntrancePhysics(entrance, PHYSICS_STEP);
+            entrance.physicsAccumulator -= PHYSICS_STEP;
+        }
+
+        const rotationT = Math.min(
+            1,
+            (now - entrance.startTime) / ROTATION_DURATION
+        );
+        const eased = rotationT * rotationT * (3 - 2 * rotationT);
+
+        this.cubeRoot.quaternion.slerpQuaternions(
+            entrance.startQuaternion,
+            entrance.targetQuaternion,
+            eased
+        );
+
+        entrance.rotationFinished = rotationT >= 1;
+
+        if (entrance.springFinished && entrance.rotationFinished) {
+            this.cubeRoot.position.set(0, 0, 0);
+            this.cubeRoot.quaternion.identity();
+
+            const resolve = entrance.resolve;
+            this.entrance = null;
+            if (resolve) resolve();
+        }
+    }
+
+    updateEntrancePhysics(entrance, dt) {
+        const position = entrance.position;
+        const velocity = entrance.velocity;
+
+        const acceleration = this.tmpVector.set(
+            -position.x * SPRING_STIFFNESS - velocity.x * SPRING_DAMPING,
+            -position.y * SPRING_STIFFNESS - velocity.y * SPRING_DAMPING,
+            -position.z * SPRING_STIFFNESS - velocity.z * SPRING_DAMPING
+        );
+
+        velocity.addScaledVector(acceleration, dt);
+        position.addScaledVector(velocity, dt);
+        this.cubeRoot.position.copy(position);
+
+        const distance = position.length();
+        const speed = velocity.length();
+
+        if (distance < 0.001 && speed < 0.001) {
+            position.set(0, 0, 0);
+            velocity.set(0, 0, 0);
+            this.cubeRoot.position.set(0, 0, 0);
+            entrance.springFinished = true;
+        }
     }
 
     startExit() {
-        if (
-            this.transition ||
-            this.animation
-        ) {
-            return Promise.reject(
-                new Error(
-                    "Another animation is running."
-                )
-            );
+        if (this.entrance || this.exit || this.animation) {
+            return Promise.reject(new Error("Animation already running."));
         }
 
-        const height =
-            this.container.clientHeight;
+        const start = this.cubeRoot.position.clone();
+        const startQuaternion = this.cubeRoot.quaternion.clone();
+        const rotation = randomRotVector();
+        const rotationQuaternion = new THREE.Quaternion();
+        rotationVectorToQuaternion(rotation, rotationQuaternion);
 
-        const width =
-            this.container.clientWidth;
+        const targetQuaternion = rotationQuaternion
+            .clone()
+            .premultiply(startQuaternion);
 
-        const scale =
-            Math.min(
-                width,
-                height
-            ) * 0.11;
+        const now = performance.now();
 
-        const cubeBoundRadius =
-            0.88335;
-
-        const margin =
-            24;
-
-        const exitY =
-            -(
-                height * 0.55 +
-                margin
-            ) / scale -
-            cubeBoundRadius;
-
-        this.transitionPosition.copy(
-            this.cubeRoot.position
-        );
-
-        this.transitionTarget.set(
-            0,
-            exitY,
-            0
-        );
-
-        this.transitionStartQuaternion.copy(
-            this.cubeRoot.quaternion
-        );
-
-        randomExitAxis(
-            this.transitionAxis
-        );
-
-        this.transitionQuaternion
-            .setFromAxisAngle(
-                this.transitionAxis,
-                randomRange(
-                    0.75,
-                    1.35
-                )
-            );
-
-        this.transitionTargetQuaternion
-            .copy(
-                this.transitionQuaternion
-            )
-            .premultiply(
-                this.transitionStartQuaternion
-            );
-
-        const now =
-            performance.now();
-
-        this.transition = {
-            type: "exit",
+        this.exit = {
+            start,
+            target: new THREE.Vector3(0, this.getExitY(), 0),
+            startQuaternion,
+            targetQuaternion,
             startTime: now,
-            lastTime: now,
-            duration: 800,
+            duration: EXIT_DURATION,
             resolve: null,
         };
 
         return new Promise(resolve => {
-            this.transition.resolve =
-                resolve;
+            this.exit.resolve = resolve;
         });
     }
 
-    updateTransition(now) {
-        const transition =
-            this.transition;
+    updateExit(now) {
+        const exit = this.exit;
+        if (!exit) return;
 
-        if (!transition) {
-            return;
-        }
+        const t = Math.min(1, (now - exit.startTime) / exit.duration);
+        const e = t * t;
 
-        if (
-            transition.type ===
-            "entrance"
-        ) {
-            this.updateEntrance(
-                transition,
-                now
-            );
-            return;
-        }
-
-        this.updateExit(
-            transition,
-            now
-        );
-    }
-
-    updateEntrance(
-        transition,
-        now
-    ) {
-        /*
-         * Real elapsed time.
-         *
-         * Clamp only huge frame gaps.
-         */
-        const dt =
-            Math.min(
-                0.05,
-                Math.max(
-                    0,
-                    (now -
-                        transition.lastTime) /
-                        1000
-                )
-            );
-
-        transition.lastTime =
-            now;
-
-        if (
-            !transition.springFinished
-        ) {
-            /*
-             * Spring:
-             *
-             * a = k(target - x) - c*v
-             *
-             * k = 10.5
-             * c = 5
-             */
-            const acceleration =
-                this.transitionTarget
-                    .clone()
-                    .sub(
-                        this.transitionPosition
-                    )
-                    .multiplyScalar(
-                        10.5
-                    );
-
-            acceleration.addScaledVector(
-                this.transitionVelocity,
-                -5
-            );
-
-            this.transitionVelocity
-                .addScaledVector(
-                    acceleration,
-                    dt
-                );
-
-            this.transitionPosition
-                .addScaledVector(
-                    this.transitionVelocity,
-                    dt
-                );
-
-            this.cubeRoot.position.copy(
-                this.transitionPosition
-            );
-
-            const distance =
-                this.transitionPosition
-                    .distanceTo(
-                        this.transitionTarget
-                    );
-
-            const velocity =
-                this.transitionVelocity
-                    .length();
-
-            if (
-                distance < 0.001 &&
-                velocity < 0.001
-            ) {
-                /*
-                 * Only the final residual is snapped.
-                 *
-                 * No intermediate damping change.
-                 */
-                this.transitionPosition.set(
-                    0,
-                    0,
-                    0
-                );
-
-                this.transitionVelocity.set(
-                    0,
-                    0,
-                    0
-                );
-
-                this.cubeRoot.position.set(
-                    0,
-                    0,
-                    0
-                );
-
-                transition.springFinished =
-                    true;
-            }
-        }
-
-        /*
-         * Rotation continues independently of whether
-         * the spring has already settled.
-         */
-        const elapsed =
-            now -
-            transition.startTime;
-
-        const t =
-            Math.min(
-                1,
-                elapsed /
-                    transition.rotationDuration
-            );
-
-        const eased =
-            t * t * (3 - 2 * t);
-
-        this.cubeRoot.quaternion
-            .slerpQuaternions(
-                this.transitionStartQuaternion,
-                this.transitionTargetQuaternion,
-                eased
-            );
-
-        /*
-         * The entrance is complete only when BOTH
-         * translation and rotation are complete.
-         */
-        if (
-            transition.springFinished &&
-            t >= 1
-        ) {
-            this.cubeRoot.position.set(
-                0,
-                0,
-                0
-            );
-
-            this.cubeRoot.quaternion.identity();
-
-            const resolve =
-                transition.resolve;
-
-            this.transition =
-                null;
-
-            if (resolve) {
-                resolve();
-            }
-        }
-    }
-
-    updateExit(
-        transition,
-        now
-    ) {
-        const elapsed =
-            now -
-            transition.startTime;
-
-        const t =
-            Math.min(
-                1,
-                elapsed /
-                    transition.duration
-            );
-
-        /*
-         * Quadratic ease-out.
-         */
-        const e =
-            t * t;
-
-        this.cubeRoot.position.lerpVectors(
-            this.transitionPosition,
-            this.transitionTarget,
+        this.cubeRoot.position.lerpVectors(exit.start, exit.target, e);
+        this.cubeRoot.quaternion.slerpQuaternions(
+            exit.startQuaternion,
+            exit.targetQuaternion,
             e
         );
 
-        this.cubeRoot.quaternion
-            .slerpQuaternions(
-                this.transitionStartQuaternion,
-                this.transitionTargetQuaternion,
-                e
-            );
-
         if (t >= 1) {
-            this.cubeRoot.position.copy(
-                this.transitionTarget
-            );
+            this.cubeRoot.position.copy(exit.target);
+            this.cubeRoot.quaternion.copy(exit.targetQuaternion);
 
-            this.cubeRoot.quaternion.copy(
-                this.transitionTargetQuaternion
-            );
-
-            const resolve =
-                transition.resolve;
-
-            this.transition =
-                null;
-
-            if (resolve) {
-                resolve();
-            }
+            const resolve = exit.resolve;
+            this.exit = null;
+            if (resolve) resolve();
         }
     }
 
-    /*
-     * ---------------------------------------------------------
-     * Cube state
-     * ---------------------------------------------------------
-     */
-
     resetWholeCubeTransform() {
-        this.cubeRoot.position.set(
-            0,
-            0,
-            0
-        );
-
+        this.cubeRoot.position.set(0, 0, 0);
         this.cubeRoot.quaternion.identity();
     }
 
-    rebuild(
-        state,
-        preserveTransform = false
-    ) {
-        this.state =
-            state;
+    rebuild(state, preserveTransform = false) {
+        this.state = state;
 
-        /*
-         * IMPORTANT:
-         *
-         * During entrance/exit we must NOT reset the
-         * whole-cube transform.
-         *
-         * A normal rebuild after a face move can safely
-         * return the cube to its canonical orientation.
-         */
         if (!preserveTransform) {
             this.resetWholeCubeTransform();
         }
 
-        for (
-            let slot = 0;
-            slot < 8;
-            ++slot
-        ) {
-            const identity =
-                state.cp[slot];
-
-            const co =
-                state.co[slot];
-
-            const cubie =
-                this.cubies[identity];
+        for (let slot = 0; slot < 8; ++slot) {
+            const identity = state.cp[slot];
+            const co = state.co[slot];
+            const cubie = this.cubies[identity];
 
             cubie.position.set(
-                CORNERS[slot][0] * 0.51,
-                CORNERS[slot][1] * 0.51,
-                CORNERS[slot][2] * 0.51
+                CORNERS[slot][0] * CUBE_HALF,
+                CORNERS[slot][1] * CUBE_HALF,
+                CORNERS[slot][2] * CUBE_HALF
             );
+            cubie.rotation.set(0, 0, 0);
+            cubie.userData.slot = slot;
+            cubie.userData.orientation = co;
 
-            cubie.rotation.set(
-                0,
-                0,
-                0
-            );
+            const colors = identityColors(identity);
+            const dirs = FACE_DIRS[slot];
 
-            cubie.userData.slot =
-                slot;
+            for (let original = 0; original < 3; ++original) {
+                const sticker = cubie.children[original + 1];
+                const target = (original + co) % 3;
+                const normal = dirs[target];
+                const face = colors[original];
 
-            cubie.userData.orientation =
-                co;
-
-            const colors =
-                identityColors(
-                    identity
-                );
-
-            const dirs =
-                FACE_DIRS[slot];
-
-            /*
-             * Reuse the three pre-created stickers.
-             */
-            for (
-                let original = 0;
-                original < 3;
-                ++original
-            ) {
-                const sticker =
-                    cubie.children[
-                        original + 1
-                    ];
-
-                const target =
-                    (original + co) % 3;
-
-                const normal =
-                    dirs[target];
-
-                const face =
-                    colors[original];
-
-                sticker.material =
-                    this.stickerMaterials[
-                        face
-                    ];
-
+                sticker.material = this.stickerMaterials[face];
+                sticker.visible = true;
                 sticker.position.set(
                     normal[0] * 0.486,
                     normal[1] * 0.486,
                     normal[2] * 0.486
                 );
 
-                const [
-                    rx,
-                    ry,
-                    rz
-                ] =
-                    stickerRotation(
-                        normal
-                    );
-
-                sticker.rotation.set(
-                    rx,
-                    ry,
-                    rz
-                );
-
-                sticker.visible =
-                    true;
+                const [rx, ry, rz] = stickerRotation(normal);
+                sticker.rotation.set(rx, ry, rz);
             }
         }
     }
 
-    /*
-     * ---------------------------------------------------------
-     * Face move animation
-     * ---------------------------------------------------------
-     */
-
     beginMove(move) {
-        if (
-            this.animation ||
-            this.transition
-        ) {
-            throw new Error(
-                "Animation already running."
-            );
+        if (this.animation) {
+            throw new Error("Move animation already running.");
         }
 
-        const pivot =
-            new THREE.Group();
+        const pivot = new THREE.Group();
+        this.cubeRoot.add(pivot);
+        this.cubeRoot.updateMatrixWorld(true);
 
-        this.cubeRoot.add(
-            pivot
-        );
+        const affected = affectedPositions(move);
+        const moving = affected.map(slot => {
+            const identity = this.state.cp[slot];
+            const cubie = this.cubies[identity];
+            pivot.attach(cubie);
+            return cubie;
+        });
 
-        this.cubeRoot.updateMatrixWorld(
-            true
-        );
-
-        const affected =
-            affectedPositions(
-                move
-            );
-
-        const moving =
-            affected.map(slot => {
-                const identity =
-                    this.state.cp[slot];
-
-                const cubie =
-                    this.cubies[identity];
-
-                pivot.attach(
-                    cubie
-                );
-
-                return cubie;
-            });
-
-        pivot.position.set(
-            0,
-            0,
-            0
-        );
-
+        pivot.position.set(0, 0, 0);
         pivot.quaternion.identity();
+        pivot.scale.set(1, 1, 1);
+        pivot.updateMatrixWorld(true);
 
-        pivot.scale.set(
-            1,
-            1,
-            1
-        );
-
-        pivot.updateMatrixWorld(
-            true
-        );
-
-        this.pivot =
-            pivot;
-
-        this.moving =
-            moving;
+        this.pivot = pivot;
+        this.moving = moving;
     }
 
-    animateMove(
-        move,
-        duration = 600
-    ) {
-        this.beginMove(
-            move
-        );
+    animateMove(move, duration = MOVE_DURATION) {
+        this.beginMove(move);
 
         let angle;
-
-        switch (move) {
-            case 0:
-                angle = -Math.PI / 2;
-                break;
-
-            case 1:
-                angle = Math.PI / 2;
-                break;
-
-            case 2:
-                angle = -Math.PI / 2;
-                break;
-
-            case 3:
-                angle = Math.PI / 2;
-                break;
-
-            case 4:
-                angle = -Math.PI / 2;
-                break;
-
-            case 5:
-                angle = Math.PI / 2;
-                break;
-
-            default:
-                throw new Error(
-                    `Invalid move: ${move}`
-                );
-        }
+        if (move === 0) angle = -Math.PI / 2;
+        else if (move === 1) angle = Math.PI / 2;
+        else if (move === 2) angle = -Math.PI / 2;
+        else if (move === 3) angle = Math.PI / 2;
+        else if (move === 4) angle = -Math.PI / 2;
+        else if (move === 5) angle = Math.PI / 2;
+        else throw new Error(`Invalid move: ${move}`);
 
         let axis;
-
-        if (move <= 1) {
-            axis =
-                this.axisX;
-        } else if (move <= 3) {
-            axis =
-                this.axisY;
-        } else {
-            axis =
-                this.axisZ;
-        }
+        if (move <= 1) axis = this.axisX;
+        else if (move <= 3) axis = this.axisY;
+        else axis = this.axisZ;
 
         return new Promise(resolve => {
             this.animation = {
@@ -1258,82 +530,42 @@ export class CubeRenderer {
                 axis,
                 angle,
                 duration,
-                startTime:
-                    performance.now(),
+                startTime: performance.now(),
                 resolve,
             };
         });
     }
 
     updateMoveAnimation(now) {
-        const animation =
-            this.animation;
+        const animation = this.animation;
+        if (!animation) return;
 
-        if (!animation) {
-            return;
-        }
+        const t = Math.min(1, (now - animation.startTime) / animation.duration);
+        const eased = cappedEasing(t);
 
-        const elapsed =
-            now -
-            animation.startTime;
-
-        const t =
-            Math.min(
-                1,
-                elapsed /
-                    animation.duration
-            );
-
-        const eased =
-            cappedEasing(t);
-
-        animation.pivot
-            .setRotationFromAxisAngle(
-                animation.axis,
-                animation.angle *
-                    eased
-            );
-
-        if (t < 1) {
-            return;
-        }
-
-        /*
-         * Exact final rotation.
-         */
-        animation.pivot
-            .setRotationFromAxisAngle(
-                animation.axis,
-                animation.angle
-            );
-
-        this.cubeRoot.updateMatrixWorld(
-            true
+        animation.pivot.setRotationFromAxisAngle(
+            animation.axis,
+            animation.angle * eased
         );
 
-        animation.pivot.updateMatrixWorld(
-            true
+        if (t < 1) return;
+
+        animation.pivot.setRotationFromAxisAngle(
+            animation.axis,
+            animation.angle
         );
 
-        for (
-            const cubie of
-            animation.moving
-        ) {
-            this.cubeRoot.attach(
-                cubie
-            );
+        this.cubeRoot.updateMatrixWorld(true);
+        animation.pivot.updateMatrixWorld(true);
+
+        for (const cubie of animation.moving) {
+            this.cubeRoot.attach(cubie);
         }
 
-        this.cubeRoot.remove(
-            animation.pivot
-        );
+        this.cubeRoot.remove(animation.pivot);
 
-        const resolve =
-            animation.resolve;
-
-        this.animation =
-            null;
-
+        const resolve = animation.resolve;
+        this.animation = null;
         resolve();
     }
 }
