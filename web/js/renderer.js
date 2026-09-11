@@ -732,7 +732,7 @@ export class CubeRenderer {
 
     animateMove(
         move,
-        duration = 360
+        duration = 420
     ) {
         this.beginMove(move);
 
@@ -823,7 +823,9 @@ export class CubeRenderer {
                     Starts and ends with zero velocity.
                 */
                 const eased =
-                    t * t * (3 - 2 * t);
+                      6 * t ** 5 -
+                      15 * t ** 4 +
+                      10 * t ** 3;
 
 
                 this.pivot
