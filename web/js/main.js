@@ -50,10 +50,29 @@ let solution =
 let solutionIndex =
     0;
 
-let busy =
+let solverReady =
     false;
 
-let solverReady =
+/*
+ * IMPORTANT:
+ *
+ * A tap during entrance is not discarded.
+ *
+ * It becomes a request that is consumed
+ * immediately after the entrance transition
+ * naturally finishes.
+ */
+let solveRequested =
+    false;
+
+/*
+ * Prevent starting two completely separate
+ * cube-generation flows.
+ *
+ * This is NOT used to block solve requests
+ * during entrance.
+ */
+let generationRunning =
     false;
 
 renderer.rebuild(
@@ -82,42 +101,36 @@ async function loadSolver() {
 
 async function startNewCube() {
     if (
-        busy ||
+        generationRunning ||
         !solverReady
     ) {
         return;
     }
 
-    busy =
+    generationRunning =
         true;
 
+    solveRequested =
+        false;
+
     phase =
-        "transition";
+        "exiting";
 
     try {
         /*
-         * Old solved cube exits first.
+         * The current solved cube leaves the screen
+         * with a random exit rotation.
          */
         await exitCube(
             renderer
         );
 
         /*
-         * Scramble is not animated.
+         * Generate the next cube only after the
+         * old cube has completely left.
          */
         currentState =
             randomState();
-
-        renderer.rebuild(
-            currentState
-        );
-
-        /*
-         * Solver data is already loaded,
-         * but keeping load() here preserves
-         * the original safety behavior.
-         */
-        await solver.load();
 
         solution =
             solver.solve(
@@ -128,48 +141,78 @@ async function startNewCube() {
             0;
 
         /*
-         * New scrambled cube enters
-         * with the spring-damper motion.
+         * Build the new cube in its canonical
+         * orientation, then entrance animation
+         * applies its random whole-cube rotation.
          */
-        await enterCube(
-            renderer
+        renderer.rebuild(
+            currentState
         );
 
         phase =
-            "scrambled";
+            "entering";
 
         setStatus(
             `Scrambled · ${solution.length} optimal moves · tap to solve`
         );
 
-    } catch (error) {
-        console.error(
-            error
+        /*
+         * Entrance runs independently of the input
+         * handler. If the user taps during this await,
+         * handleTap() sets solveRequested = true.
+         */
+        await enterCube(
+            renderer
         );
+
+        /*
+         * Entrance is now genuinely finished:
+         *
+         * - spring settled
+         * - rotation finished
+         * - cube is exactly at the origin
+         * - cube rotation is exactly identity
+         */
+        if (solveRequested) {
+            solveRequested =
+                false;
+
+            phase =
+                "solving";
+
+            await solveCurrentCube();
+        } else {
+            phase =
+                "scrambled";
+
+            setStatus(
+                `Scrambled · ${solution.length} optimal moves · tap to solve`
+            );
+        }
+    } catch (error) {
+        console.error(error);
 
         phase =
             "solved";
 
+        solveRequested =
+            false;
+
         setStatus(
             "Failed to generate solution."
         );
-
     } finally {
-        busy =
+        generationRunning =
             false;
     }
 }
 
 async function solveCurrentCube() {
     if (
-        busy ||
         !solverReady
     ) {
         return;
     }
-
-    busy =
-        true;
 
     phase =
         "solving";
@@ -178,7 +221,7 @@ async function solveCurrentCube() {
         for (
             ;
             solutionIndex <
-                solution.length;
+            solution.length;
             ++solutionIndex
         ) {
             const move =
@@ -190,16 +233,32 @@ async function solveCurrentCube() {
                 `${MOVE_NAMES[move]} · ${solutionIndex + 1}/${solution.length}`
             );
 
+            /*
+             * Renderer handles the complete 600 ms
+             * face rotation in the same RAF used
+             * by the rest of the page.
+             */
             await renderer.animateMove(
                 move
             );
 
+            /*
+             * Apply the logical move only after
+             * the visual move has completed.
+             */
             currentState =
                 applyMove(
                     currentState,
                     move
                 );
 
+            /*
+             * Rebuild the logical cube.
+             *
+             * At this point there is no entrance/exit
+             * transition, so returning to the canonical
+             * whole-cube transform is safe.
+             */
             renderer.rebuild(
                 currentState
             );
@@ -211,11 +270,8 @@ async function solveCurrentCube() {
         setStatus(
             "Solved · tap for the next cube"
         );
-
     } catch (error) {
-        console.error(
-            error
-        );
+        console.error(error);
 
         phase =
             "scrambled";
@@ -223,31 +279,79 @@ async function solveCurrentCube() {
         setStatus(
             "Failed while solving."
         );
-
-    } finally {
-        busy =
-            false;
     }
 }
 
 async function handleTap() {
     if (
-        busy ||
         !solverReady
     ) {
         return;
     }
 
+    /*
+     * -------------------------------------------------------
+     * Entrance:
+     *
+     * Do NOT ignore the tap.
+     *
+     * Just remember that the user wants to solve.
+     * The current entrance animation continues naturally.
+     * -------------------------------------------------------
+     */
+    if (
+        phase === "entering"
+    ) {
+        solveRequested =
+            true;
+
+        setStatus(
+            "Preparing solution…"
+        );
+
+        return;
+    }
+
+    /*
+     * -------------------------------------------------------
+     * Normal scrambled cube.
+     * -------------------------------------------------------
+     */
+    if (
+        phase === "scrambled"
+    ) {
+        if (
+            generationRunning
+        ) {
+            return;
+        }
+
+        phase =
+            "solving";
+
+        await solveCurrentCube();
+
+        return;
+    }
+
+    /*
+     * -------------------------------------------------------
+     * Solved cube:
+     *
+     * Generate the next cube.
+     * -------------------------------------------------------
+     */
     if (
         phase === "solved"
     ) {
         await startNewCube();
 
-    } else if (
-        phase === "scrambled"
-    ) {
-        await solveCurrentCube();
+        return;
     }
+
+    /*
+     * During solving/exiting, taps are ignored.
+     */
 }
 
 window.addEventListener(
@@ -258,16 +362,10 @@ window.addEventListener(
     }
 );
 
-loadSolver()
-    .catch(error => {
-        console.error(
-            error
-        );
+loadSolver().catch(error => {
+    console.error(error);
 
-        solverReady =
-            false;
-
-        setStatus(
-            "Failed to load optimal_move.bin"
-        );
-    });
+    setStatus(
+        "Failed to load optimal solver."
+    );
+});
