@@ -1,6 +1,11 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js";
 import { affectedPositions } from "./cube.js";
 
+
+/* =========================================================
+   Cube definition
+   ========================================================= */
+
 const CORNERS = [
     [ 1, 1, 1], // 0 URF
     [-1, 1, 1], // 1 UFL
@@ -12,75 +17,73 @@ const CORNERS = [
     [ 1,-1,-1], // 7 DRB
 ];
 
+
 /*
- * Kociemba corner face order.
- *
- * URF = U R F
- * UFL = U F L
- * ULB = U L B
- * UBR = U B R
- * DFR = D F R
- * DLF = D L F
- * DBL = D B L
- * DRB = D R B
- */
+    For each Kociemba corner:
+
+    [ U/D, L/R, F/B ]
+
+    These vectors describe the three sticker normals
+    in the cubie's local coordinate system.
+*/
 const FACE_DIRS = [
-    // URF
+    // URF = U R F
     [
-        [ 0, 1, 0], // U
-        [ 1, 0, 0], // R
-        [ 0, 0, 1], // F
+        [ 0, 1, 0],
+        [ 1, 0, 0],
+        [ 0, 0, 1],
     ],
 
-    // UFL
+    // UFL = U F L
     [
-        [ 0, 1, 0], // U
-        [ 0, 0, 1], // F
-        [-1, 0, 0], // L
+        [ 0, 1, 0],
+        [ 0, 0, 1],
+        [-1, 0, 0],
     ],
 
-    // ULB
+    // ULB = U L B
     [
-        [ 0, 1, 0], // U
-        [-1, 0, 0], // L
-        [ 0, 0,-1], // B
+        [ 0, 1, 0],
+        [-1, 0, 0],
+        [ 0, 0,-1],
     ],
 
-    // UBR
+    // UBR = U B R
     [
-        [ 0, 1, 0], // U
-        [ 0, 0,-1], // B
-        [ 1, 0, 0], // R
+        [ 0, 1, 0],
+        [ 0, 0,-1],
+        [ 1, 0, 0],
     ],
 
-    // DFR
+    // DFR = D F R
     [
-        [ 0,-1, 0], // D
-        [ 0, 0, 1], // F
-        [ 1, 0, 0], // R
+        [ 0,-1, 0],
+        [ 0, 0, 1],
+        [ 1, 0, 0],
     ],
 
-    // DLF
+    // DLF = D L F
     [
-        [ 0,-1, 0], // D
-        [-1, 0, 0], // L
-        [ 0, 0, 1], // F
+        [ 0,-1, 0],
+        [-1, 0, 0],
+        [ 0, 0, 1],
     ],
 
-    // DBL
+    // DBL = D B L
     [
-        [ 0,-1, 0], // D
-        [ 0, 0,-1], // B
-        [-1, 0, 0], // L
+        [ 0,-1, 0],
+        [ 0, 0,-1],
+        [-1, 0, 0],
     ],
 
-    // DRB
+    // DRB = D R B
     [
-        [ 0,-1, 0], // D
-        [ 1, 0, 0], // R
-        [ 0, 0,-1], // B
+        [ 0,-1, 0],
+        [ 1, 0, 0],
+        [ 0, 0,-1],
     ],
 ];
+
 
 const FACE_COLOR = {
     U: 0xf7f7f7,
@@ -90,6 +93,11 @@ const FACE_COLOR = {
     F: 0x35a853,
     B: 0x3c6dcc,
 };
+
+
+/* =========================================================
+   Helpers
+   ========================================================= */
 
 function faceName(normal) {
     const [x, y, z] = normal;
@@ -103,10 +111,11 @@ function faceName(normal) {
     return "B";
 }
 
+
 /*
- * PlaneGeometry faces the +Z direction by default.
- * Rotate it so the sticker lies flush with the corresponding cube face.
- */
+    Rotate a geometry whose local +Z direction is the sticker
+    normal so that it faces the correct cube face.
+*/
 function stickerRotation(normal) {
     const [x, y, z] = normal;
 
@@ -121,67 +130,208 @@ function stickerRotation(normal) {
     return [Math.PI / 2, 0, 0];
 }
 
-function stickerMaterial(face) {
-    return new THREE.MeshStandardMaterial({
-        color: FACE_COLOR[face],
-        roughness: 0.48,
-        metalness: 0.0,
-        side: THREE.DoubleSide,
-    });
-}
 
 function identityColors(identity) {
     return FACE_DIRS[identity].map(faceName);
 }
 
-function makeCubie(identity) {
+
+/* =========================================================
+   Geometry
+   ========================================================= */
+
+/*
+    Rounded square sticker.
+
+    Instead of PlaneGeometry, use a very shallow extruded
+    rounded rectangle.
+
+    This gives the sticker:
+      - rounded corners
+      - tiny bevel
+      - smoother highlights
+      - much less harsh aliasing
+*/
+function createStickerGeometry() {
+    const width = 0.78;
+    const radius = 0.065;
+
+    const x = -width / 2;
+    const y = -width / 2;
+    const w = width;
+    const r = radius;
+
+    const shape = new THREE.Shape();
+
+    shape.moveTo(x + r, y);
+
+    shape.lineTo(x + w - r, y);
+    shape.quadraticCurveTo(
+        x + w,
+        y,
+        x + w,
+        y + r
+    );
+
+    shape.lineTo(x + w, y + w - r);
+    shape.quadraticCurveTo(
+        x + w,
+        y + w,
+        x + w - r,
+        y + w
+    );
+
+    shape.lineTo(x + r, y + w);
+    shape.quadraticCurveTo(
+        x,
+        y + w,
+        x,
+        y + w - r
+    );
+
+    shape.lineTo(x, y + r);
+    shape.quadraticCurveTo(
+        x,
+        y,
+        x + r,
+        y
+    );
+
+    const geometry = new THREE.ExtrudeGeometry(
+        shape,
+        {
+            depth: 0.018,
+
+            bevelEnabled: true,
+
+            bevelThickness: 0.009,
+            bevelSize: 0.018,
+            bevelSegments: 3,
+
+            curveSegments: 8,
+
+            steps: 1,
+        }
+    );
+
+    /*
+        ExtrudeGeometry extends from z = 0 to depth.
+
+        Center it around z = 0 so the sticker position
+        represents its center rather than its back surface.
+    */
+    geometry.translate(
+        0,
+        0,
+        -0.009
+    );
+
+    geometry.computeVertexNormals();
+
+    return geometry;
+}
+
+
+function createCubieGeometry() {
+    /*
+        Slightly rounded cubie body.
+
+        A tiny bevel prevents razor-sharp silhouette edges,
+        which are one of the places where aliasing is most visible.
+    */
+    const geometry = new THREE.BoxGeometry(
+        0.96,
+        0.96,
+        0.96,
+        3,
+        3,
+        3
+    );
+
+    return geometry;
+}
+
+
+/* =========================================================
+   Materials
+   ========================================================= */
+
+function stickerMaterial(face) {
+    return new THREE.MeshStandardMaterial({
+        color: FACE_COLOR[face],
+
+        roughness: 0.38,
+        metalness: 0.0,
+
+        /*
+            Keep the sticker colors clean while still allowing
+            lighting to create a soft premium appearance.
+        */
+        side: THREE.FrontSide,
+    });
+}
+
+
+function bodyMaterial() {
+    return new THREE.MeshStandardMaterial({
+        color: 0x101010,
+
+        roughness: 0.58,
+        metalness: 0.02,
+
+        side: THREE.FrontSide,
+    });
+}
+
+
+/* =========================================================
+   Cubie creation
+   ========================================================= */
+
+function makeCubie(identity, stickerGeometry) {
     const group = new THREE.Group();
 
     group.userData.identity = identity;
 
-    /*
-     * Slightly smaller than the spacing between cubies.
-     * This produces clean black seams without excessive gaps.
-     */
-    const bodyGeometry = new THREE.BoxGeometry(
-        0.96,
-        0.96,
-        0.96
-    );
-
-    const bodyMaterial =
-        new THREE.MeshStandardMaterial({
-            color: 0x101010,
-            roughness: 0.68,
-            metalness: 0.02,
-        });
-
+    const bodyGeometry = createCubieGeometry();
     const body = new THREE.Mesh(
         bodyGeometry,
-        bodyMaterial
+        bodyMaterial()
     );
 
     group.add(body);
 
+    /*
+        Keep the shared sticker geometry immutable.
+        Meshes can safely reuse it.
+    */
+    group.userData.stickerGeometry = stickerGeometry;
+
     return group;
 }
+
+
+/* =========================================================
+   Renderer
+   ========================================================= */
 
 export class CubeRenderer {
     constructor(container) {
         this.container = container;
 
-        /* ---------------------------------------------------------
-         * Scene
-         * --------------------------------------------------------- */
+        /* ---------------------------------------------
+           Scene
+        --------------------------------------------- */
 
         this.scene = new THREE.Scene();
 
         this.scene.background =
             new THREE.Color(0x0b0b0b);
 
-        /* ---------------------------------------------------------
-         * Camera
-         * --------------------------------------------------------- */
+
+        /* ---------------------------------------------
+           Camera
+        --------------------------------------------- */
 
         this.camera =
             new THREE.OrthographicCamera(
@@ -205,56 +355,89 @@ export class CubeRenderer {
             0
         );
 
-        /* ---------------------------------------------------------
-         * Renderer
-         * --------------------------------------------------------- */
+
+        /* ---------------------------------------------
+           WebGL renderer
+        --------------------------------------------- */
 
         this.renderer =
             new THREE.WebGLRenderer({
                 antialias: true,
                 alpha: false,
-                powerPreference: "high-performance",
+
+                powerPreference:
+                    "high-performance",
+
+                preserveDrawingBuffer:
+                    false,
             });
 
+
         /*
-         * 2x is a good quality/performance ceiling for this scene.
-         * Higher values are usually unnecessary and expensive on mobile.
-         */
+            High-DPI rendering.
+
+            3 is intentionally used as the upper limit:
+            - 1x : normal displays
+            - 2x : Retina / high-DPI
+            - 3x : very high-DPI displays
+
+            Going above 3 usually costs a lot of GPU time
+            for relatively little visual improvement.
+        */
         this.renderer.setPixelRatio(
             Math.min(
                 window.devicePixelRatio || 1,
-                2
+                3
             )
         );
 
+
         this.renderer.setSize(
-            Math.max(1, container.clientWidth),
-            Math.max(1, container.clientHeight),
+            Math.max(
+                1,
+                container.clientWidth
+            ),
+            Math.max(
+                1,
+                container.clientHeight
+            ),
             false
         );
 
+
         /*
-         * Modern color pipeline.
-         */
+            Color management.
+        */
         this.renderer.outputColorSpace =
             THREE.SRGBColorSpace;
 
         /*
-         * Filmic tone mapping makes the StandardMaterial lighting
-         * look less harsh and more photographic.
-         */
+            ACES gives smoother highlight rolloff,
+            especially on white stickers.
+        */
         this.renderer.toneMapping =
             THREE.ACESFilmicToneMapping;
 
-        this.renderer.toneMappingExposure = 1.0;
+        this.renderer.toneMappingExposure =
+            1.0;
+
+
+        /*
+            Better shadow quality if shadows are enabled
+            later. Currently no shadow map is required,
+            which keeps the renderer lightweight.
+        */
+        this.renderer.shadowMap.enabled = false;
+
 
         container.appendChild(
             this.renderer.domElement
         );
 
-        /* ---------------------------------------------------------
-         * Cube root
-         * --------------------------------------------------------- */
+
+        /* ---------------------------------------------
+           Cube root
+        --------------------------------------------- */
 
         this.cubeRoot =
             new THREE.Group();
@@ -263,49 +446,64 @@ export class CubeRenderer {
             this.cubeRoot
         );
 
-        /* ---------------------------------------------------------
-         * Persistent cubies
-         * --------------------------------------------------------- */
 
-        this.cubies = Array.from(
-            { length: 8 },
-            (_, identity) => {
-                const cubie =
-                    makeCubie(identity);
+        /* ---------------------------------------------
+           Shared geometry
+        --------------------------------------------- */
 
-                this.cubeRoot.add(
-                    cubie
-                );
+        this.stickerGeometry =
+            createStickerGeometry();
 
-                return cubie;
-            }
-        );
 
-        /* ---------------------------------------------------------
-         * Lighting
-         * --------------------------------------------------------- */
+        /* ---------------------------------------------
+           Cubies
+        --------------------------------------------- */
+
+        this.cubies =
+            Array.from(
+                { length: 8 },
+                (_, identity) => {
+                    const cubie =
+                        makeCubie(
+                            identity,
+                            this.stickerGeometry
+                        );
+
+                    this.cubeRoot.add(
+                        cubie
+                    );
+
+                    return cubie;
+                }
+            );
+
+
+        /* ---------------------------------------------
+           Lighting
+        --------------------------------------------- */
 
         /*
-         * Soft global fill.
-         */
+            Soft overall illumination.
+        */
         this.ambientLight =
             new THREE.HemisphereLight(
                 0xffffff,
-                0x181818,
-                1.65
+                0x141414,
+                1.45
             );
 
         this.scene.add(
             this.ambientLight
         );
 
+
         /*
-         * Main soft-looking directional light.
-         */
+            Main soft key light.
+        */
         this.keyLight =
             new THREE.DirectionalLight(
                 0xffffff,
-                2.25
+                2.15
             );
 
         this.keyLight.position.set(
@@ -318,36 +516,38 @@ export class CubeRenderer {
             this.keyLight
         );
 
+
         /*
-         * Gentle secondary fill from the opposite side.
-         * This prevents the back/right faces from becoming completely flat.
-         */
+            Very soft cool fill from behind.
+        */
         this.fillLight =
             new THREE.DirectionalLight(
                 0xb8c8ff,
-                0.55
+                0.42
             );
 
         this.fillLight.position.set(
-                -5,
-                2,
-                -4
+            -5,
+            2,
+            -4
         );
 
         this.scene.add(
             this.fillLight
         );
 
-        /* ---------------------------------------------------------
-         * Animation state
-         * --------------------------------------------------------- */
+
+        /* ---------------------------------------------
+           Animation state
+        --------------------------------------------- */
 
         this.pivot = null;
         this.moving = null;
 
-        /* ---------------------------------------------------------
-         * Resize
-         * --------------------------------------------------------- */
+
+        /* ---------------------------------------------
+           Resize handling
+        --------------------------------------------- */
 
         this.resizeObserver =
             new ResizeObserver(() => {
@@ -358,17 +558,15 @@ export class CubeRenderer {
             container
         );
 
-        this.resize();
 
-        /* ---------------------------------------------------------
-         * State
-         * --------------------------------------------------------- */
+        this.resize();
 
         this.state = null;
 
-        /* ---------------------------------------------------------
-         * Render loop
-         * --------------------------------------------------------- */
+
+        /* ---------------------------------------------
+           Render loop
+        --------------------------------------------- */
 
         this.renderLoop =
             this.renderLoop.bind(this);
@@ -377,6 +575,11 @@ export class CubeRenderer {
             this.renderLoop
         );
     }
+
+
+    /* =====================================================
+       Resize
+       ===================================================== */
 
     resize() {
         const width =
@@ -394,10 +597,6 @@ export class CubeRenderer {
         const aspect =
             width / height;
 
-        /*
-         * Keep the cube approximately the same visual size
-         * regardless of screen aspect ratio.
-         */
         const size = 4.5;
 
         this.camera.left =
@@ -414,12 +613,29 @@ export class CubeRenderer {
 
         this.camera.updateProjectionMatrix();
 
+
+        /*
+            Reapply DPR after resizing so the canvas remains
+            correctly sized on high-DPI displays.
+        */
+        this.renderer.setPixelRatio(
+            Math.min(
+                window.devicePixelRatio || 1,
+                3
+            )
+        );
+
         this.renderer.setSize(
             width,
             height,
             false
         );
     }
+
+
+    /* =====================================================
+       Render
+       ===================================================== */
 
     renderLoop() {
         this.renderer.render(
@@ -431,6 +647,11 @@ export class CubeRenderer {
             this.renderLoop
         );
     }
+
+
+    /* =====================================================
+       Whole cube transform
+       ===================================================== */
 
     setWholeCubeTransform(
         position,
@@ -444,6 +665,7 @@ export class CubeRenderer {
             quaternion
         );
     }
+
 
     resetWholeCubeTransform() {
         this.cubeRoot.position.set(
@@ -459,19 +681,22 @@ export class CubeRenderer {
         );
     }
 
+
+    /* =====================================================
+       Rebuild cube from logical state
+       ===================================================== */
+
     rebuild(state) {
         this.state = state;
 
         this.resetWholeCubeTransform();
+
 
         for (
             let slot = 0;
             slot < 8;
             ++slot
         ) {
-            /*
-             * cp[slot] = physical cubie occupying this slot.
-             */
             const identity =
                 state.cp[slot];
 
@@ -481,24 +706,23 @@ export class CubeRenderer {
             const cubie =
                 this.cubies[identity];
 
+
             /*
-             * Position is determined by the current slot.
-             */
+                Position cubie.
+            */
             cubie.position.set(
                 CORNERS[slot][0] * 0.51,
                 CORNERS[slot][1] * 0.51,
                 CORNERS[slot][2] * 0.51
             );
 
-            /*
-             * Orientation is represented by sticker placement,
-             * not by rotating the cubie itself.
-             */
+
             cubie.rotation.set(
                 0,
                 0,
                 0
             );
+
 
             cubie.userData.slot =
                 slot;
@@ -506,10 +730,12 @@ export class CubeRenderer {
             cubie.userData.orientation =
                 co;
 
+
             /*
-             * Child 0 = black cubie body.
-             * Remove all previous stickers.
-             */
+                Remove old stickers.
+
+                Child 0 is always the black cubie body.
+            */
             while (
                 cubie.children.length > 1
             ) {
@@ -518,27 +744,26 @@ export class CubeRenderer {
                 );
             }
 
-            const colors =
-                identityColors(
-                    identity
-                );
 
-            /*
-             * Target face order is determined by the current slot.
-             */
+            const colors =
+                identityColors(identity);
+
             const dirs =
                 FACE_DIRS[slot];
 
+
             /*
-             * Kociemba corner orientation:
-             *
-             * target = (original + co) mod 3
-             */
+                Recreate three stickers.
+            */
             for (
                 let original = 0;
                 original < 3;
                 ++original
             ) {
+                /*
+                    Corner orientation convention:
+                    original sticker moves by `co`.
+                */
                 const target =
                     (original + co) % 3;
 
@@ -548,34 +773,40 @@ export class CubeRenderer {
                 const face =
                     colors[original];
 
+
                 const sticker =
                     new THREE.Mesh(
-                        new THREE.PlaneGeometry(
-                            0.78,
-                            0.78
-                        ),
+                        this.stickerGeometry,
                         stickerMaterial(face)
                     );
 
+
+                /*
+                    Place sticker slightly outside
+                    the cubie surface.
+                */
                 sticker.position.set(
                     normal[0] * 0.486,
                     normal[1] * 0.486,
                     normal[2] * 0.486
                 );
 
+
                 const [
                     rx,
                     ry,
                     rz
-                ] = stickerRotation(
-                    normal
-                );
+                ] =
+                    stickerRotation(
+                        normal
+                    );
 
                 sticker.rotation.set(
                     rx,
                     ry,
                     rz
                 );
+
 
                 cubie.add(
                     sticker
@@ -584,12 +815,18 @@ export class CubeRenderer {
         }
     }
 
+
+    /* =====================================================
+       Begin move
+       ===================================================== */
+
     beginMove(move) {
         if (this.pivot) {
             throw new Error(
                 "Animation already running."
             );
         }
+
 
         const pivot =
             new THREE.Group();
@@ -601,10 +838,10 @@ export class CubeRenderer {
         this.pivot =
             pivot;
 
+
         const affected =
-            affectedPositions(
-                move
-            );
+            affectedPositions(move);
+
 
         this.moving =
             affected.map(slot => {
@@ -622,44 +859,42 @@ export class CubeRenderer {
             });
     }
 
+
+    /* =====================================================
+       Animate move
+       ===================================================== */
+
     animateMove(
         move,
         duration = 360
     ) {
         this.beginMove(move);
 
-        /*
-         * Physical rotation signs matched to cube.js.
-         *
-         * Coordinate system:
-         *   +X = R
-         *   +Y = U
-         *   +Z = F
-         */
+
         let angle;
 
         switch (move) {
-            case 0: // R
+            case 0:
                 angle = -Math.PI / 2;
                 break;
 
-            case 1: // R'
+            case 1:
                 angle = Math.PI / 2;
                 break;
 
-            case 2: // U
+            case 2:
                 angle = -Math.PI / 2;
                 break;
 
-            case 3: // U'
+            case 3:
                 angle = Math.PI / 2;
                 break;
 
-            case 4: // F
+            case 4:
                 angle = -Math.PI / 2;
                 break;
 
-            case 5: // F'
+            case 5:
                 angle = Math.PI / 2;
                 break;
 
@@ -668,6 +903,7 @@ export class CubeRenderer {
                     `Invalid move: ${move}`
                 );
         }
+
 
         let axis;
 
@@ -694,8 +930,10 @@ export class CubeRenderer {
                 );
         }
 
+
         const start =
             performance.now();
+
 
         return new Promise(resolve => {
             const frame = now => {
@@ -706,17 +944,21 @@ export class CubeRenderer {
                             duration
                     );
 
+
                 /*
-                 * Smoothstep gives a soft acceleration and deceleration.
-                 */
+                    Smoothstep:
+                    zero velocity at both ends.
+                */
                 const eased =
                     t * t * (3 - 2 * t);
+
 
                 this.pivot
                     .setRotationFromAxisAngle(
                         axis,
                         angle * eased
                     );
+
 
                 if (t < 1) {
                     requestAnimationFrame(
@@ -726,41 +968,47 @@ export class CubeRenderer {
                     return;
                 }
 
+
                 /*
-                 * Exact final angle.
-                 */
+                    Exact final rotation.
+                */
                 this.pivot
                     .setRotationFromAxisAngle(
                         axis,
                         angle
                     );
 
+
                 this.pivot.updateMatrixWorld(
                     true
                 );
 
+
                 /*
-                 * Attach moving cubies back to cubeRoot
-                 * while preserving their world transform.
-                 */
+                    Put cubies back into cubeRoot
+                    while preserving world transforms.
+                */
                 for (
-                    const cubie
-                    of this.moving
+                    const cubie of this.moving
                 ) {
                     this.cubeRoot.attach(
                         cubie
                     );
                 }
 
+
                 this.cubeRoot.remove(
                     this.pivot
                 );
 
+
                 this.pivot = null;
                 this.moving = null;
 
+
                 resolve();
             };
+
 
             requestAnimationFrame(
                 frame
@@ -769,4 +1017,9 @@ export class CubeRenderer {
     }
 }
 
+
+/*
+    main.js / animation.js can import THREE
+    from this module.
+*/
 export { THREE };
