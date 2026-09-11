@@ -23,10 +23,10 @@ function setStatus(text) {
 }
 
 async function loadSolver() {
-    setStatus("Loading optimal solver…");
+    setStatus("Loading solver…");
     await solver.load();
     solverReady = true;
-    setStatus("Tap to generate a cube.");
+    setStatus("Tap for the next cube");
 }
 
 async function startNewCube() {
@@ -47,7 +47,7 @@ async function startNewCube() {
 
         phase = "entering";
         setStatus(
-            `Scrambled · ${solution.length} optimal moves · tap to solve`
+            `Tap to solve`
         );
 
         // Do NOT await this. Entrance and solving may overlap.
@@ -57,7 +57,7 @@ async function startNewCube() {
             if (phase === "entering") {
                 phase = "scrambled";
                 setStatus(
-                    `Scrambled · ${solution.length} optimal moves · tap to solve`
+                    `Tap to solve`
                 );
             }
         }).catch(error => {
@@ -105,7 +105,7 @@ async function solveCurrentCube() {
 
         phase = "solved";
         busy = false;
-        setStatus("Solved · tap for the next cube");
+        setStatus("Tap for the next cube");
     } catch (error) {
         console.error(error);
         phase = "scrambled";
