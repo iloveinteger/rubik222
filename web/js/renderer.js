@@ -473,7 +473,7 @@ export class CubeRenderer {
         this.moving = moving;
     }
 
-    animateMove(move, duration = 1500) {
+    animateMove(move, duration = 3000) {
         this.beginMove(move);
 
         let angle;
