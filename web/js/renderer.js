@@ -214,21 +214,21 @@ export class CubeRenderer {
          * Therefore the black gap remains visible even
          * when another cubie's sticker rotates over it.
          */
-        this.coreGeometry =
-            createCoreGeometry();
+        // this.coreGeometry =
+        //     createCoreGeometry();
 
-        this.coreMaterial =
-            createBodyMaterial();
+        // this.coreMaterial =
+        //     createBodyMaterial();
 
-        this.core =
-            new THREE.Mesh(
-                this.coreGeometry,
-                this.coreMaterial
-            );
+        // this.core =
+        //     new THREE.Mesh(
+        //         this.coreGeometry,
+        //         this.coreMaterial
+        //     );
 
-        this.cubeRoot.add(
-            this.core
-        );
+        // this.cubeRoot.add(
+        //     this.core
+        // );
 
         this.stickerGeometry =
             createStickerGeometry();
