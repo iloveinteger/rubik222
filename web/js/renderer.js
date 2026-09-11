@@ -115,6 +115,139 @@ function makeCubie(
     return group;
 }
 
+/*
+ * Move animation speed cap.
+ *
+ * The original smootherstep:
+ *
+ *     p(t) = 6t^5 - 15t^4 + 10t^3
+ *
+ * has a maximum normalized velocity of 1.875.
+ *
+ * Here we keep the same basic acceleration/deceleration shape,
+ * but cap its velocity and normalize the integral so that:
+ *
+ *     p(0) = 0
+ *     p(1) = 1
+ *
+ * Therefore the cube still rotates exactly 90 degrees
+ * in exactly 600 ms.
+ *
+ * Lower value = lower maximum speed.
+ *
+ * Examples:
+ *
+ *     1.875 = original smootherstep
+ *     1.4   = slightly slower peak
+ *     1.2   = noticeably slower peak
+ *     1.0   = strongly capped
+ */
+const SPEED_CAP = 1.2;
+
+/*
+ * Number of samples used to construct the normalized
+ * cumulative velocity curve.
+ *
+ * This is calculated only once for the current cap,
+ * not every animation frame.
+ */
+const SPEED_SAMPLES = 1024;
+
+function createSpeedProfile(cap) {
+    const values = new Float64Array(
+        SPEED_SAMPLES + 1
+    );
+
+    /*
+     * Original smootherstep derivative:
+     *
+     *     30t²(1-t)²
+     *
+     * Apply the velocity cap here.
+     */
+    for (let i = 0; i <= SPEED_SAMPLES; ++i) {
+        const t =
+            i / SPEED_SAMPLES;
+
+        const raw =
+            30 *
+            t *
+            t *
+            (1 - t) *
+            (1 - t);
+
+        values[i] =
+            Math.min(raw, cap);
+    }
+
+    /*
+     * Integrate the velocity using the trapezoidal rule.
+     *
+     * cumulative[i] represents the distance travelled
+     * from t = 0 to t = i / SPEED_SAMPLES.
+     */
+    const cumulative =
+        new Float64Array(
+            SPEED_SAMPLES + 1
+        );
+
+    const dt =
+        1 / SPEED_SAMPLES;
+
+    for (let i = 1; i <= SPEED_SAMPLES; ++i) {
+        cumulative[i] =
+            cumulative[i - 1] +
+            (values[i - 1] + values[i]) *
+            0.5 *
+            dt;
+    }
+
+    /*
+     * Normalize the total distance to exactly 1.
+     */
+    const total =
+        cumulative[SPEED_SAMPLES];
+
+    for (let i = 0; i <= SPEED_SAMPLES; ++i) {
+        cumulative[i] /= total;
+    }
+
+    return cumulative;
+}
+
+const MOVE_SPEED_PROFILE =
+    createSpeedProfile(SPEED_CAP);
+
+function cappedEasing(t) {
+    if (t <= 0) {
+        return 0;
+    }
+
+    if (t >= 1) {
+        return 1;
+    }
+
+    const position =
+        t * SPEED_SAMPLES;
+
+    const index =
+        Math.floor(position);
+
+    const fraction =
+        position - index;
+
+    const a =
+        MOVE_SPEED_PROFILE[index];
+
+    const b =
+        MOVE_SPEED_PROFILE[index + 1];
+
+    return (
+        a +
+        (b - a) * fraction
+    );
+}
+
 export class CubeRenderer {
     constructor(container) {
         this.container = container;
@@ -330,12 +463,17 @@ export class CubeRenderer {
             );
 
         /*
-         * Quintic smootherstep.
+         * Capped velocity profile.
+         *
+         * Unlike simply applying min() to the old
+         * position function, this caps VELOCITY
+         * and then integrates it.
+         *
+         * The result is normalized to [0, 1],
+         * so the final angle is still exact.
          */
         const eased =
-            6 * t ** 5 -
-            15 * t ** 4 +
-            10 * t ** 3;
+            cappedEasing(t);
 
         animation.pivot
             .setRotationFromAxisAngle(
