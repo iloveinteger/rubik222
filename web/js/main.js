@@ -28,7 +28,7 @@ async function loadSolver() {
     await solver.load();
 
     solverReady = true;
-    setStatus("Tap / click to generate a cube.");
+    setStatus("Tap to generate a cube.");
 }
 
 async function startNewCube() {
